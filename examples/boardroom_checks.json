@@ -1,0 +1,22 @@
+{
+  "paths": [
+    {"name": "Mic 1 reaches the call (USB TX) through its full chain", "from": "FLEX_IN.out.1", "to": "USB_TX_CONF",
+     "via": ["MIC_01_HPF", "MIC_01_EQ", "AEC_01", "CONF_AUTOMIXER", "CONF_TX_LEVELER", "CONF_TX_COMP", "MIC_MUTE"]},
+    {"name": "Mic 2 reaches the call (USB TX) through its full chain", "from": "FLEX_IN.out.2", "to": "USB_TX_CONF",
+     "via": ["MIC_02_HPF", "MIC_02_EQ", "AEC_02", "CONF_AUTOMIXER", "CONF_TX_LEVELER", "CONF_TX_COMP", "MIC_MUTE"]},
+    {"name": "Mic 1 enters AEC_01 on its Microphone input", "from": "FLEX_IN.out.1", "to": "AEC_01.in.Microphone"},
+    {"name": "Mics do not reach the loudspeakers", "from": "FLEX_IN.out.1", "to": "FLEX_OUT", "expect": false},
+    {"name": "Far end (USB RX) reaches speaker output 1", "from": "USB_RX_CONF", "to": "FLEX_OUT.in.5",
+     "via": ["CONF_RX_LEVEL", "ROOM_PROGRAM_MIX", "ROOM_MASTER_VOL", "SPK_HPF", "SPK_EQ", "SPK_LIMITER"]},
+    {"name": "Far end (USB RX) reaches speaker output 4", "from": "USB_RX_CONF", "to": "FLEX_OUT.in.8"},
+    {"name": "Far end does not loop back to the call", "from": "USB_RX_CONF", "to": "USB_TX_CONF", "expect": false},
+    {"name": "Far end reaches AEC_01's reference", "from": "USB_RX_CONF", "to": "AEC_01.in.Reference"},
+    {"name": "Far end reaches AEC_02's reference", "from": "USB_RX_CONF", "to": "AEC_02.in.Reference"},
+    {"name": "Laptop reaches the speakers", "from": "FLEX_IN.out.3", "to": "FLEX_OUT.in.6", "via": ["LAPTOP_AUDIO_IN", "ROOM_PROGRAM_MIX"]},
+    {"name": "NEGATIVE: laptop does not reach the call", "from": "FLEX_IN.out.3", "to": "USB_TX_CONF", "expect": false},
+    {"name": "NEGATIVE: laptop does not reach the mic send chain", "from": "FLEX_IN.out.4", "to": "CONF_AUTOMIXER", "expect": false}
+  ],
+  "allow_unconnected": ["FLEX_IN.out.5", "FLEX_IN.out.6", "FLEX_IN.out.7", "FLEX_IN.out.8",
+                        "FLEX_OUT.in.1", "FLEX_OUT.in.2", "FLEX_OUT.in.3", "FLEX_OUT.in.4",
+                        "CONF_AUTOMIXER.out.1", "CONF_AUTOMIXER.out.2"]
+}

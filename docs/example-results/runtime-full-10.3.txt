@@ -1,0 +1,49 @@
+PASS QRC reachable and design emulating  -- Emulator Active Headless_Boardroom_10.3__test
+PASS ROOM_MODE Lua script running without errors  -- status=OK errors=0.0
+PASS all 28 named components present in the running design  -- missing=[]
+PASS AEC_01/AEC_02 run as acoustic echo cancellers
+PASS Core 8 Flex channels 1-4 inputs, 5-8 outputs
+PASS mic preamps at 36 dB (-12 dBu sensitivity) with phantom power on  -- gain=36.0/36.0 phantom=1.0/1.0
+PASS initial value MIC_01_HPF.frequency = 100  -- got 100.0
+PASS initial value MIC_02_HPF.frequency = 100  -- got 100.0
+PASS initial value SPK_HPF.frequency = 80  -- got 80.0
+PASS initial value CONF_RX_LEVEL.gain = -6  -- got -6.0
+PASS initial value LAPTOP_AUDIO_IN.gain = -6  -- got -6.0
+PASS initial value ROOM_PROGRAM_MIX.input_1_output_1_gain = -6  -- got -6.0
+PASS initial value ROOM_PROGRAM_MIX.input_2_output_1_gain = -6  -- got -6.0
+PASS initial value ROOM_PROGRAM_MIX.input_3_output_1_gain = -6  -- got -6.0
+PASS initial value ROOM_PROGRAM_MIX.input_4_output_1_gain = -6  -- got -6.0
+PASS initial value CONF_TX_COMP.ratio = 2  -- got 2.0
+PASS initial value SPK_LIMITER.threshold_level = -10  -- got -10.0
+PASS CONF_TX_LEVELER (AGC) active, not bypassed  -- target=-20.0dB
+PASS startup state is IDLE
+PASS IDLE: mic TX muted, master muted at -20 dB, laptop off, conf RX muted  -- {'mic_tx_muted': 1.0, 'master_muted': 1.0, 'master_gain': -20.0, 'laptop_muted': 1.0, 'conf_rx_muted': 1.0}
+PASS MIC MUTE button legend reads MICS MUTED  -- legend='MICS MUTED'
+PASS IDLE: UI feedback matches DSP state, exactly one mode LED lit  -- ui={'RoomMode': 0.0, 'IdleLed': 1.0, 'MeetingLed': 0.0, 'PresentationLed': 0.0, 'MeetingMode': 0.0, 'PresentationMode': 0.0, 'MicMute': 1.0, 'MicMutedLed': 1.0, 'ProgramEnable': 0.0, 'ProgramLed': 0.0, 'MasterMute': 1.0, 'MasterVolume': -20.0, 'StatusMessage': 0.0, 'CallStatus': 0.0, 'InCallLed': 0.0, 'PcConnectedLed': 0.0, 'RoomModeText': 'IDLE', 'StatusMessageText': 'Room is idle. Choose Meeting or Presentation to start.', 'CallStatusText': 'PC not connected', 'MicMuteLegend': 'MICS MUTED'} dsp={'mic_tx_muted': 1.0, 'master_muted': 1.0, 'master_gain': -20.0, 'laptop_muted': 1.0, 'conf_rx_muted': 1.0}
+PASS IDLE: unmute request from panel refused
+PASS IDLE: laptop enable refused
+PASS IDLE: volume + refused
+PASS IDLE: external DSP unmute of MIC_MUTE is re-muted
+PASS Idle -> MEETING
+PASS MEETING: mic TX live, conf RX on, master on, laptop off  -- {'mic_tx_muted': 0.0, 'master_muted': 0.0, 'master_gain': -20.0, 'laptop_muted': 1.0, 'conf_rx_muted': 0.0}
+PASS MIC MUTE button legend reads MICS LIVE  -- legend='MICS LIVE'
+PASS pressing the active mode button again keeps MEETING
+PASS panel MIC MUTE mutes MIC_MUTE
+PASS external DSP mute mirrored on the panel
+PASS Volume + twice: -20 -> -16 dB
+PASS Volume - : -16 -> -18 dB
+PASS fader cannot go below -40 dB (usable range)  -- gain=-40.0
+PASS Volume + stops at 0 dB
+PASS MEETING: laptop can be enabled
+PASS re-pressing MEETING keeps the user's laptop choice and the mode
+PASS MEETING after user changes: UI feedback matches DSP state, exactly one mode LED lit  -- ui={'RoomMode': 0.0, 'IdleLed': 0.0, 'MeetingLed': 1.0, 'PresentationLed': 0.0, 'MeetingMode': 1.0, 'PresentationMode': 0.0, 'MicMute': 0.0, 'MicMutedLed': 0.0, 'ProgramEnable': 1.0, 'ProgramLed': 1.0, 'MasterMute': 0.0, 'MasterVolume': -18.0, 'StatusMessage': 0.0, 'CallStatus': 0.0, 'InCallLed': 0.0, 'PcConnectedLed': 0.0, 'RoomModeText': 'MEETING', 'StatusMessageText': 'Meeting: microphones live to the call, call audio in the room.', 'CallStatusText': 'PC not connected', 'MicMuteLegend': 'MICS LIVE'} dsp={'mic_tx_muted': 0.0, 'master_muted': 0.0, 'master_gain': -18.0, 'laptop_muted': 0.0, 'conf_rx_muted': 0.0}
+NOT TESTED HID mute sync (app <-> room)  -- the HID LEDs are driven by the PC; in emulation QRC writes to them are accepted but ignored (stay 0), so the PC side cannot be simulated
+PASS Meeting -> PRESENTATION: laptop on, master on, mics still live  -- {'mic_tx_muted': 0.0, 'master_muted': 0.0, 'master_gain': -18.0, 'laptop_muted': 0.0, 'conf_rx_muted': 0.0}
+PASS PRESENTATION: UI feedback matches DSP state, exactly one mode LED lit  -- ui={'RoomMode': 0.0, 'IdleLed': 0.0, 'MeetingLed': 0.0, 'PresentationLed': 1.0, 'MeetingMode': 0.0, 'PresentationMode': 1.0, 'MicMute': 0.0, 'MicMutedLed': 0.0, 'ProgramEnable': 1.0, 'ProgramLed': 1.0, 'MasterMute': 0.0, 'MasterVolume': -18.0, 'StatusMessage': 0.0, 'CallStatus': 0.0, 'InCallLed': 0.0, 'PcConnectedLed': 0.0, 'RoomModeText': 'PRESENTATION', 'StatusMessageText': 'Presentation: laptop audio in the room.', 'CallStatusText': 'PC not connected', 'MicMuteLegend': 'MICS LIVE'} dsp={'mic_tx_muted': 0.0, 'master_muted': 0.0, 'master_gain': -18.0, 'laptop_muted': 0.0, 'conf_rx_muted': 0.0}
+PASS ROOM OFF: IDLE, everything muted, volume reset to -20 dB  -- {'mic_tx_muted': 1.0, 'master_muted': 1.0, 'master_gain': -20.0, 'laptop_muted': 1.0, 'conf_rx_muted': 1.0}
+PASS HID: with no call active, room mute changes never press the app's mute button  -- presses=0
+PASS display placeholder hook called (ON for modes, OFF for Room Off)
+PASS after ROOM OFF: UI feedback matches DSP state, exactly one mode LED lit  -- ui={'RoomMode': 0.0, 'IdleLed': 1.0, 'MeetingLed': 0.0, 'PresentationLed': 0.0, 'MeetingMode': 0.0, 'PresentationMode': 0.0, 'MicMute': 1.0, 'MicMutedLed': 1.0, 'ProgramEnable': 0.0, 'ProgramLed': 0.0, 'MasterMute': 1.0, 'MasterVolume': -20.0, 'StatusMessage': 0.0, 'CallStatus': 0.0, 'InCallLed': 0.0, 'PcConnectedLed': 0.0, 'RoomModeText': 'IDLE', 'StatusMessageText': 'Room is idle. Choose Meeting or Presentation to start.', 'CallStatusText': 'PC not connected', 'MicMuteLegend': 'MICS MUTED'} dsp={'mic_tx_muted': 1.0, 'master_muted': 1.0, 'master_gain': -20.0, 'laptop_muted': 1.0, 'conf_rx_muted': 1.0}
+PASS Idle -> PRESENTATION keeps mics muted
+PASS no script errors after the run
+SUMMARY pass=47 fail=0 blocked=0 not_tested=1

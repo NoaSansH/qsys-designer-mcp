@@ -1,0 +1,33 @@
+<!-- Builds the .NET 8 helper used with Q-SYS Designer 10 and later (which run on modern .NET).
+     It loads Designer purely by reflection, so the output contains nothing from QSC.
+       dotnet publish helper-net8 -c Release -o src/qsys_mcp/helper/net8
+     Designer 9.x (.NET Framework) instead gets the same sources compiled on first use. -->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <AssemblyName>qhelper</AssemblyName>
+    <RootNamespace>QsysHelper</RootNamespace>
+    <PlatformTarget>x64</PlatformTarget>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <EnableUnsafeBinaryFormatterSerialization>true</EnableUnsafeBinaryFormatterSerialization>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <!-- reproducible, and no build-machine paths baked into the binary -->
+    <DebugType>none</DebugType>
+    <Deterministic>true</Deterministic>
+    <PathMap>$(MSBuildProjectDirectory)\..=/src/</PathMap>
+    <NoWarn>CS0649;CS0168;CA1416</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../src/qsys_mcp/helper/QCommon.cs" />
+    <Compile Include="../src/qsys_mcp/helper/QsysHelper.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- compile-time only: at run time Designer's own copy is used, so its JSON attributes apply -->
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.1" ExcludeAssets="runtime" PrivateAssets="all" />
+  </ItemGroup>
+</Project>

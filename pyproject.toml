@@ -1,0 +1,48 @@
+[project]
+name = "qsys-designer-mcp"
+version = "0.1.0"
+description = "Unofficial MCP server that builds, reads, checks and emulates Q-SYS Designer designs"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+keywords = ["mcp", "q-sys", "qsys", "audio", "dsp", "av", "claude"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Win32 (MS Windows)",
+    "Intended Audience :: Developers",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Topic :: Multimedia :: Sound/Audio",
+]
+dependencies = [
+    "mcp[cli]>=2.3",
+    "luaparser>=3.2",
+    "pywinauto>=0.6.8",
+    "comtypes>=1.4",
+    "mss>=9.0",
+    "Pillow>=10.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-asyncio>=0.23"]
+
+[project.urls]
+Homepage = "https://github.com/nerif-tafu/qsys-designer-mcp"
+Issues = "https://github.com/nerif-tafu/qsys-designer-mcp/issues"
+
+[project.scripts]
+qsys-designer-mcp = "qsys_mcp.server:main"
+
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/qsys_mcp"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src", "helper-net8/QsysHelper.csproj", "examples", "tests", "docs", "README.md", "CHANGELOG.md", "LICENSE"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

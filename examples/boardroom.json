@@ -1,0 +1,1160 @@
+{
+ "description": "Boardroom, 8 x 6 m, 10-12 people: 2 ceiling mics with AEC, Teams/Zoom PC on USB (audio + HID mute sync), laptop input, 4 ceiling speakers, touch panel.",
+ "core": {
+  "model": "Core 8 Flex"
+ },
+ "usb_sound_cards": 1,
+ "pages": [
+  "Boardroom Audio"
+ ],
+ "components": [
+  {
+   "name": "FLEX_IN",
+   "x": 40,
+   "y": 60,
+   "values": {
+    "channel_1_preamp_gain": 36,
+    "channel_2_preamp_gain": 36,
+    "channel_1_sensitivity": -12,
+    "channel_2_sensitivity": -12,
+    "channel_1_phantom_power": true,
+    "channel_2_phantom_power": true,
+    "channel_1_flex_input_enable": true,
+    "channel_2_flex_input_enable": true,
+    "channel_3_flex_input_enable": true,
+    "channel_4_flex_input_enable": true,
+    "channel_5_flex_input_enable": false,
+    "channel_6_flex_input_enable": false,
+    "channel_7_flex_input_enable": false,
+    "channel_8_flex_input_enable": false
+   },
+   "script_access": "None",
+   "inventory": "Flex In"
+  },
+  {
+   "name": "FLEX_OUT",
+   "x": 1940,
+   "y": 560,
+   "values": {
+    "channel_1_flex_output_enable": false,
+    "channel_2_flex_output_enable": false,
+    "channel_3_flex_output_enable": false,
+    "channel_4_flex_output_enable": false,
+    "channel_5_flex_output_enable": true,
+    "channel_6_flex_output_enable": true,
+    "channel_7_flex_output_enable": true,
+    "channel_8_flex_output_enable": true
+   },
+   "script_access": "None",
+   "inventory": "Flex Out"
+  },
+  {
+   "name": "USB_RX_CONF",
+   "x": 40,
+   "y": 760,
+   "script_access": "None",
+   "inventory": "USB Sound Card 1 In"
+  },
+  {
+   "name": "USB_TX_CONF",
+   "x": 1760,
+   "y": 120,
+   "script_access": "None",
+   "inventory": "USB Sound Card 1 Out"
+  },
+  {
+   "name": "USB_HID_CONF",
+   "x": 260,
+   "y": 1000,
+   "script_access": "Script",
+   "inventory": "HID Conferencing"
+  },
+  {
+   "name": "MIC_01_HPF",
+   "x": 260,
+   "y": 40,
+   "class": "filter_highpass",
+   "properties": {
+    "multi_channel_type": 1
+   },
+   "values": {
+    "frequency": 100
+   },
+   "script_access": "None"
+  },
+  {
+   "name": "MIC_01_EQ",
+   "x": 460,
+   "y": 40,
+   "class": "equalizer_parametric",
+   "properties": {
+    "multi_channel_type": 1,
+    "n_bands": 4
+   },
+   "script_access": "None"
+  },
+  {
+   "name": "AEC_01",
+   "x": 680,
+   "y": 40,
+   "class": "acoustic_echo_canceler_simd",
+   "properties": {
+    "channel_count": 1
+   },
+   "script_access": "None"
+  },
+  {
+   "name": "MIC_02_HPF",
+   "x": 260,
+   "y": 220,
+   "class": "filter_highpass",
+   "properties": {
+    "multi_channel_type": 1
+   },
+   "values": {
+    "frequency": 100
+   },
+   "script_access": "None"
+  },
+  {
+   "name": "MIC_02_EQ",
+   "x": 460,
+   "y": 220,
+   "class": "equalizer_parametric",
+   "properties": {
+    "multi_channel_type": 1,
+    "n_bands": 4
+   },
+   "script_access": "None"
+  },
+  {
+   "name": "AEC_02",
+   "x": 680,
+   "y": 220,
+   "class": "acoustic_echo_canceler_simd",
+   "properties": {
+    "channel_count": 1
+   },
+   "script_access": "None"
+  },
+  {
+   "name": "MIC_INPUT_METER",
+   "x": 260,
+   "y": 400,
+   "class": "meter2",
+   "properties": {
+    "multi_channel_type": 3,
+    "multi_channel_count": 2
+   },
+   "script_access": "None"
+  },
+  {
+   "name": "CONF_AUTOMIXER",
+   "x": 900,
+   "y": 100,
+   "class": "auto_mixer_gating_adaptive",
+   "properties": {
+    "n_channels": 2,
+    "output_choice": 3
+   },
+   "script_access": "None"
+  },
+  {
+   "name": "CONF_TX_LEVELER",
+   "x": 1120,
+   "y": 120,
+   "class": "leveler2",
+   "properties": {
+    "multi_channel_type": 1
+   },
+   "script_access": "None"
+  },
+  {
+   "name": "CONF_TX_COMP",
+   "x": 1340,
+   "y": 120,
+   "class": "compressor",
+   "properties": {
+    "multi_channel_type": 1
+   },
+   "values": {
+    "ratio": 2
+   },
+   "script_access": "None"
+  },
+  {
+   "name": "MIC_MUTE",
+   "x": 1550,
+   "y": 120,
+   "class": "gain",
+   "properties": {
+    "multi_channel_type": 1
+   },
+   "values": {
+    "mute": true
+   },
+   "script_access": "Script"
+  },
+  {
+   "name": "TX_METER",
+   "x": 1760,
+   "y": 300,
+   "class": "meter2",
+   "properties": {
+    "multi_channel_type": 1
+   },
+   "script_access": "None"
+  },
+  {
+   "name": "LAPTOP_AUDIO_IN",
+   "x": 460,
+   "y": 560,
+   "class": "gain",
+   "properties": {
+    "multi_channel_type": 2
+   },
+   "values": {
+    "gain": -6,
+    "mute": true
+   },
+   "script_access": "Script"
+  },
+  {
+   "name": "CONF_RX_LEVEL",
+   "x": 460,
+   "y": 760,
+   "class": "gain",
+   "properties": {
+    "multi_channel_type": 2
+   },
+   "values": {
+    "gain": -6
+   },
+   "script_access": "Script"
+  },
+  {
+   "name": "ROOM_PROGRAM_MIX",
+   "x": 680,
+   "y": 620,
+   "class": "mixer",
+   "properties": {
+    "n_inputs": 4,
+    "n_outputs": 1
+   },
+   "values": {
+    "input_1_output_1_gain": -6,
+    "input_2_output_1_gain": -6,
+    "input_3_output_1_gain": -6,
+    "input_4_output_1_gain": -6
+   },
+   "script_access": "None"
+  },
+  {
+   "name": "ROOM_MASTER_VOL",
+   "x": 900,
+   "y": 640,
+   "class": "gain",
+   "properties": {
+    "multi_channel_type": 1,
+    "max_gain": 0,
+    "min_gain": -100
+   },
+   "values": {
+    "gain": -20,
+    "mute": true
+   },
+   "script_access": "Script"
+  },
+  {
+   "name": "SPK_OUT_01",
+   "x": 1120,
+   "y": 520,
+   "class": "gain",
+   "properties": {
+    "multi_channel_type": 1,
+    "max_gain": 6
+   },
+   "script_access": "None"
+  },
+  {
+   "name": "SPK_OUT_02",
+   "x": 1120,
+   "y": 630,
+   "class": "gain",
+   "properties": {
+    "multi_channel_type": 1,
+    "max_gain": 6
+   },
+   "script_access": "None"
+  },
+  {
+   "name": "SPK_OUT_03",
+   "x": 1120,
+   "y": 740,
+   "class": "gain",
+   "properties": {
+    "multi_channel_type": 1,
+    "max_gain": 6
+   },
+   "script_access": "None"
+  },
+  {
+   "name": "SPK_OUT_04",
+   "x": 1120,
+   "y": 850,
+   "class": "gain",
+   "properties": {
+    "multi_channel_type": 1,
+    "max_gain": 6
+   },
+   "script_access": "None"
+  },
+  {
+   "name": "SPK_HPF",
+   "x": 1340,
+   "y": 560,
+   "class": "filter_highpass",
+   "properties": {
+    "multi_channel_type": 3,
+    "multi_channel_count": 4
+   },
+   "values": {
+    "frequency": 80
+   },
+   "script_access": "None"
+  },
+  {
+   "name": "SPK_EQ",
+   "x": 1550,
+   "y": 560,
+   "class": "equalizer_parametric",
+   "properties": {
+    "multi_channel_type": 3,
+    "multi_channel_count": 4,
+    "n_bands": 4
+   },
+   "script_access": "None"
+  },
+  {
+   "name": "SPK_LIMITER",
+   "x": 1760,
+   "y": 560,
+   "class": "limiter_peak",
+   "properties": {
+    "multi_channel_type": 3,
+    "multi_channel_count": 4
+   },
+   "values": {
+    "threshold_level": -10
+   },
+   "script_access": "None"
+  },
+  {
+   "name": "SPK_METER",
+   "x": 1940,
+   "y": 860,
+   "class": "meter2",
+   "properties": {
+    "multi_channel_type": 3,
+    "multi_channel_count": 4
+   },
+   "script_access": "None"
+  },
+  {
+   "name": "ROOM_MODE",
+   "x": 40,
+   "y": 1000,
+   "class": "device_controller_script",
+   "script_access": "External",
+   "text_controller": {
+    "controls": [
+     {
+      "name": "MeetingMode",
+      "type": "button",
+      "button_type": "toggle"
+     },
+     {
+      "name": "PresentationMode",
+      "type": "button",
+      "button_type": "toggle"
+     },
+     {
+      "name": "MasterMute",
+      "type": "button",
+      "button_type": "toggle"
+     },
+     {
+      "name": "MicMute",
+      "type": "button",
+      "button_type": "toggle"
+     },
+     {
+      "name": "ProgramEnable",
+      "type": "button",
+      "button_type": "toggle"
+     },
+     {
+      "name": "RoomOff",
+      "type": "button",
+      "button_type": "trigger"
+     },
+     {
+      "name": "VolumeUp",
+      "type": "button",
+      "button_type": "trigger"
+     },
+     {
+      "name": "VolumeDown",
+      "type": "button",
+      "button_type": "trigger"
+     },
+     {
+      "name": "MasterVolume",
+      "type": "knob",
+      "unit": "dB",
+      "min": -40,
+      "max": 0
+     },
+     {
+      "name": "RoomMode",
+      "type": "status_text"
+     },
+     {
+      "name": "StatusMessage",
+      "type": "status_text"
+     },
+     {
+      "name": "CallStatus",
+      "type": "status_text"
+     },
+     {
+      "name": "IdleLed",
+      "type": "led"
+     },
+     {
+      "name": "MeetingLed",
+      "type": "led"
+     },
+     {
+      "name": "PresentationLed",
+      "type": "led"
+     },
+     {
+      "name": "MicMutedLed",
+      "type": "led"
+     },
+     {
+      "name": "ProgramLed",
+      "type": "led"
+     },
+     {
+      "name": "PcConnectedLed",
+      "type": "led"
+     },
+     {
+      "name": "InCallLed",
+      "type": "led"
+     }
+    ],
+    "lua_file": "boardroom_room_mode.lua"
+   }
+  }
+ ],
+ "wires": [
+  [
+   "FLEX_IN.out.1",
+   "MIC_01_HPF.in.1"
+  ],
+  [
+   "FLEX_IN.out.1",
+   "MIC_INPUT_METER.in.1"
+  ],
+  [
+   "MIC_01_HPF.out.1",
+   "MIC_01_EQ.in.1"
+  ],
+  [
+   "MIC_01_EQ.out.1",
+   "AEC_01.in.Microphone"
+  ],
+  [
+   "ROOM_MASTER_VOL.out.1",
+   "AEC_01.in.Reference"
+  ],
+  [
+   "AEC_01.out.1",
+   "CONF_AUTOMIXER.in.1"
+  ],
+  [
+   "FLEX_IN.out.2",
+   "MIC_02_HPF.in.1"
+  ],
+  [
+   "FLEX_IN.out.2",
+   "MIC_INPUT_METER.in.2"
+  ],
+  [
+   "MIC_02_HPF.out.1",
+   "MIC_02_EQ.in.1"
+  ],
+  [
+   "MIC_02_EQ.out.1",
+   "AEC_02.in.Microphone"
+  ],
+  [
+   "ROOM_MASTER_VOL.out.1",
+   "AEC_02.in.Reference"
+  ],
+  [
+   "AEC_02.out.1",
+   "CONF_AUTOMIXER.in.2"
+  ],
+  [
+   "CONF_AUTOMIXER.out.Mix Output",
+   "CONF_TX_LEVELER.in.1"
+  ],
+  [
+   "CONF_TX_LEVELER.out.1",
+   "CONF_TX_COMP.in.1"
+  ],
+  [
+   "CONF_TX_COMP.out.1",
+   "MIC_MUTE.in.1"
+  ],
+  [
+   "MIC_MUTE.out.1",
+   "USB_TX_CONF.in.1"
+  ],
+  [
+   "MIC_MUTE.out.1",
+   "USB_TX_CONF.in.2"
+  ],
+  [
+   "MIC_MUTE.out.1",
+   "TX_METER.in.1"
+  ],
+  [
+   "FLEX_IN.out.3",
+   "LAPTOP_AUDIO_IN.in.1"
+  ],
+  [
+   "FLEX_IN.out.4",
+   "LAPTOP_AUDIO_IN.in.2"
+  ],
+  [
+   "LAPTOP_AUDIO_IN.out.1",
+   "ROOM_PROGRAM_MIX.in.3"
+  ],
+  [
+   "LAPTOP_AUDIO_IN.out.2",
+   "ROOM_PROGRAM_MIX.in.4"
+  ],
+  [
+   "USB_RX_CONF.out.1",
+   "CONF_RX_LEVEL.in.1"
+  ],
+  [
+   "USB_RX_CONF.out.2",
+   "CONF_RX_LEVEL.in.2"
+  ],
+  [
+   "CONF_RX_LEVEL.out.1",
+   "ROOM_PROGRAM_MIX.in.1"
+  ],
+  [
+   "CONF_RX_LEVEL.out.2",
+   "ROOM_PROGRAM_MIX.in.2"
+  ],
+  [
+   "ROOM_PROGRAM_MIX.out.1",
+   "ROOM_MASTER_VOL.in.1"
+  ],
+  [
+   "ROOM_MASTER_VOL.out.1",
+   "SPK_OUT_01.in.1"
+  ],
+  [
+   "SPK_OUT_01.out.1",
+   "SPK_HPF.in.1"
+  ],
+  [
+   "SPK_HPF.out.1",
+   "SPK_EQ.in.1"
+  ],
+  [
+   "SPK_EQ.out.1",
+   "SPK_LIMITER.in.1"
+  ],
+  [
+   "SPK_LIMITER.out.1",
+   "FLEX_OUT.in.5"
+  ],
+  [
+   "SPK_LIMITER.out.1",
+   "SPK_METER.in.1"
+  ],
+  [
+   "ROOM_MASTER_VOL.out.1",
+   "SPK_OUT_02.in.1"
+  ],
+  [
+   "SPK_OUT_02.out.1",
+   "SPK_HPF.in.2"
+  ],
+  [
+   "SPK_HPF.out.2",
+   "SPK_EQ.in.2"
+  ],
+  [
+   "SPK_EQ.out.2",
+   "SPK_LIMITER.in.2"
+  ],
+  [
+   "SPK_LIMITER.out.2",
+   "FLEX_OUT.in.6"
+  ],
+  [
+   "SPK_LIMITER.out.2",
+   "SPK_METER.in.2"
+  ],
+  [
+   "ROOM_MASTER_VOL.out.1",
+   "SPK_OUT_03.in.1"
+  ],
+  [
+   "SPK_OUT_03.out.1",
+   "SPK_HPF.in.3"
+  ],
+  [
+   "SPK_HPF.out.3",
+   "SPK_EQ.in.3"
+  ],
+  [
+   "SPK_EQ.out.3",
+   "SPK_LIMITER.in.3"
+  ],
+  [
+   "SPK_LIMITER.out.3",
+   "FLEX_OUT.in.7"
+  ],
+  [
+   "SPK_LIMITER.out.3",
+   "SPK_METER.in.3"
+  ],
+  [
+   "ROOM_MASTER_VOL.out.1",
+   "SPK_OUT_04.in.1"
+  ],
+  [
+   "SPK_OUT_04.out.1",
+   "SPK_HPF.in.4"
+  ],
+  [
+   "SPK_HPF.out.4",
+   "SPK_EQ.in.4"
+  ],
+  [
+   "SPK_EQ.out.4",
+   "SPK_LIMITER.in.4"
+  ],
+  [
+   "SPK_LIMITER.out.4",
+   "FLEX_OUT.in.8"
+  ],
+  [
+   "SPK_LIMITER.out.4",
+   "SPK_METER.in.4"
+  ]
+ ],
+ "ucis": [
+  {
+   "name": "Boardroom Touch Panel",
+   "pages": [
+    {
+     "name": "Room Control",
+     "color": "#FF1C1D21",
+     "elements": [
+      {
+       "type": "text",
+       "text": "BOARDROOM",
+       "x": 30,
+       "y": 20,
+       "w": 400,
+       "h": 50,
+       "color": "#FFFFFFFF",
+       "font_size": 30,
+       "align": "Left"
+      },
+      {
+       "type": "text",
+       "text": "Mode",
+       "x": 660,
+       "y": 24,
+       "w": 90,
+       "h": 44,
+       "color": "#FF9AA0A6",
+       "font_size": 16,
+       "align": "Right"
+      },
+      {
+       "type": "control",
+       "component": "ROOM_MODE",
+       "control": "RoomMode",
+       "x": 760,
+       "y": 24,
+       "w": 300,
+       "h": 44,
+       "style": "Text",
+       "color": "#FF2B2D33",
+       "text_color": "#FFFFFFFF",
+       "font_size": 20,
+       "corner_radius": 6
+      },
+      {
+       "type": "control",
+       "component": "ROOM_MODE",
+       "control": "StatusMessage",
+       "x": 30,
+       "y": 80,
+       "w": 1030,
+       "h": 34,
+       "style": "Text",
+       "color": "#FF1C1D21",
+       "text_color": "#FF9AA0A6",
+       "font_size": 14
+      },
+      {
+       "type": "control",
+       "component": "ROOM_MODE",
+       "control": "MeetingMode",
+       "x": 30,
+       "y": 130,
+       "w": 320,
+       "h": 110,
+       "label": "MEETING",
+       "color": "#FF2E7D32",
+       "off_color": "#FF3A3B40",
+       "text_color": "#FFFFFFFF",
+       "font_size": 24,
+       "corner_radius": 10
+      },
+      {
+       "type": "control",
+       "component": "ROOM_MODE",
+       "control": "PresentationMode",
+       "x": 385,
+       "y": 130,
+       "w": 320,
+       "h": 110,
+       "label": "PRESENTATION",
+       "color": "#FF1565C0",
+       "off_color": "#FF3A3B40",
+       "text_color": "#FFFFFFFF",
+       "font_size": 24,
+       "corner_radius": 10
+      },
+      {
+       "type": "control",
+       "component": "ROOM_MODE",
+       "control": "RoomOff",
+       "x": 740,
+       "y": 130,
+       "w": 320,
+       "h": 110,
+       "label": "ROOM OFF",
+       "color": "#FFC62828",
+       "off_color": "#FF5A2A2A",
+       "text_color": "#FFFFFFFF",
+       "font_size": 24,
+       "corner_radius": 10
+      },
+      {
+       "type": "control",
+       "component": "ROOM_MODE",
+       "control": "MeetingLed",
+       "x": 175,
+       "y": 250,
+       "w": 30,
+       "h": 30,
+       "color": "#FF4CAF50"
+      },
+      {
+       "type": "control",
+       "component": "ROOM_MODE",
+       "control": "PresentationLed",
+       "x": 530,
+       "y": 250,
+       "w": 30,
+       "h": 30,
+       "color": "#FF42A5F5"
+      },
+      {
+       "type": "control",
+       "component": "ROOM_MODE",
+       "control": "IdleLed",
+       "x": 885,
+       "y": 250,
+       "w": 30,
+       "h": 30,
+       "color": "#FFFFB300"
+      },
+      {
+       "type": "text",
+       "text": "Idle / standby",
+       "x": 820,
+       "y": 282,
+       "w": 160,
+       "h": 24,
+       "color": "#FF9AA0A6",
+       "font_size": 13,
+       "align": "Center"
+      },
+      {
+       "type": "text",
+       "text": "ROOM VOLUME",
+       "x": 30,
+       "y": 320,
+       "w": 300,
+       "h": 30,
+       "color": "#FFFFFFFF",
+       "font_size": 18,
+       "align": "Left"
+      },
+      {
+       "type": "control",
+       "component": "ROOM_MODE",
+       "control": "MasterVolume",
+       "x": 40,
+       "y": 360,
+       "w": 90,
+       "h": 400,
+       "style": "Fader",
+       "color": "#FFD6D9DE"
+      },
+      {
+       "type": "control",
+       "component": "ROOM_MODE",
+       "control": "MasterMute",
+       "x": 150,
+       "y": 360,
+       "w": 170,
+       "h": 60,
+       "label": "MUTE ROOM",
+       "color": "#FFC62828",
+       "text_color": "#FFFFFFFF",
+       "font_size": 18,
+       "corner_radius": 8,
+       "off_color": "#FF3A3B40"
+      },
+      {
+       "type": "control",
+       "component": "ROOM_MODE",
+       "control": "VolumeUp",
+       "x": 150,
+       "y": 430,
+       "w": 80,
+       "h": 60,
+       "label": "+",
+       "color": "#FF5F6368",
+       "text_color": "#FFFFFFFF",
+       "font_size": 26,
+       "corner_radius": 8,
+       "off_color": "#FF3A3B40"
+      },
+      {
+       "type": "control",
+       "component": "ROOM_MODE",
+       "control": "VolumeDown",
+       "x": 240,
+       "y": 430,
+       "w": 80,
+       "h": 60,
+       "label": "-",
+       "color": "#FF5F6368",
+       "text_color": "#FFFFFFFF",
+       "font_size": 26,
+       "corner_radius": 8,
+       "off_color": "#FF3A3B40"
+      },
+      {
+       "type": "text",
+       "text": "Speaker levels",
+       "x": 150,
+       "y": 500,
+       "w": 200,
+       "h": 24,
+       "color": "#FF9AA0A6",
+       "font_size": 13,
+       "align": "Left"
+      },
+      {
+       "type": "control",
+       "component": "SPK_METER",
+       "control": "meter_1",
+       "x": 150,
+       "y": 530,
+       "w": 34,
+       "h": 200,
+       "style": "Meter"
+      },
+      {
+       "type": "text",
+       "text": "SPK 1",
+       "x": 144,
+       "y": 734,
+       "w": 46,
+       "h": 22,
+       "color": "#FF9AA0A6",
+       "font_size": 11,
+       "align": "Center"
+      },
+      {
+       "type": "control",
+       "component": "SPK_METER",
+       "control": "meter_2",
+       "x": 192,
+       "y": 530,
+       "w": 34,
+       "h": 200,
+       "style": "Meter"
+      },
+      {
+       "type": "text",
+       "text": "SPK 2",
+       "x": 186,
+       "y": 734,
+       "w": 46,
+       "h": 22,
+       "color": "#FF9AA0A6",
+       "font_size": 11,
+       "align": "Center"
+      },
+      {
+       "type": "control",
+       "component": "SPK_METER",
+       "control": "meter_3",
+       "x": 234,
+       "y": 530,
+       "w": 34,
+       "h": 200,
+       "style": "Meter"
+      },
+      {
+       "type": "text",
+       "text": "SPK 3",
+       "x": 228,
+       "y": 734,
+       "w": 46,
+       "h": 22,
+       "color": "#FF9AA0A6",
+       "font_size": 11,
+       "align": "Center"
+      },
+      {
+       "type": "control",
+       "component": "SPK_METER",
+       "control": "meter_4",
+       "x": 276,
+       "y": 530,
+       "w": 34,
+       "h": 200,
+       "style": "Meter"
+      },
+      {
+       "type": "text",
+       "text": "SPK 4",
+       "x": 270,
+       "y": 734,
+       "w": 46,
+       "h": 22,
+       "color": "#FF9AA0A6",
+       "font_size": 11,
+       "align": "Center"
+      },
+      {
+       "type": "text",
+       "text": "MICROPHONES",
+       "x": 400,
+       "y": 320,
+       "w": 300,
+       "h": 30,
+       "color": "#FFFFFFFF",
+       "font_size": 18,
+       "align": "Left"
+      },
+      {
+       "type": "control",
+       "component": "ROOM_MODE",
+       "control": "MicMute",
+       "x": 400,
+       "y": 360,
+       "w": 300,
+       "h": 110,
+       "color": "#FFC62828",
+       "off_color": "#FF2E7D32",
+       "text_color": "#FFFFFFFF",
+       "font_size": 24,
+       "corner_radius": 10
+      },
+      {
+       "type": "control",
+       "component": "ROOM_MODE",
+       "control": "MicMutedLed",
+       "x": 400,
+       "y": 490,
+       "w": 30,
+       "h": 30,
+       "color": "#FFFF5252"
+      },
+      {
+       "type": "text",
+       "text": "Mics muted (far end cannot hear the room)",
+       "x": 440,
+       "y": 490,
+       "w": 300,
+       "h": 30,
+       "color": "#FF9AA0A6",
+       "font_size": 13,
+       "align": "Left"
+      },
+      {
+       "type": "text",
+       "text": "Mic send level",
+       "x": 400,
+       "y": 540,
+       "w": 200,
+       "h": 24,
+       "color": "#FF9AA0A6",
+       "font_size": 13,
+       "align": "Left"
+      },
+      {
+       "type": "control",
+       "component": "TX_METER",
+       "control": "meter_1",
+       "x": 400,
+       "y": 570,
+       "w": 300,
+       "h": 34,
+       "style": "Meter"
+      },
+      {
+       "type": "text",
+       "text": "LAPTOP AUDIO",
+       "x": 760,
+       "y": 320,
+       "w": 300,
+       "h": 30,
+       "color": "#FFFFFFFF",
+       "font_size": 18,
+       "align": "Left"
+      },
+      {
+       "type": "control",
+       "component": "ROOM_MODE",
+       "control": "ProgramEnable",
+       "x": 760,
+       "y": 360,
+       "w": 300,
+       "h": 110,
+       "label": "LAPTOP AUDIO",
+       "color": "#FF1565C0",
+       "off_color": "#FF3A3B40",
+       "text_color": "#FFFFFFFF",
+       "font_size": 24,
+       "corner_radius": 10
+      },
+      {
+       "type": "control",
+       "component": "ROOM_MODE",
+       "control": "ProgramLed",
+       "x": 760,
+       "y": 490,
+       "w": 30,
+       "h": 30,
+       "color": "#FF42A5F5"
+      },
+      {
+       "type": "text",
+       "text": "Laptop audio playing in room",
+       "x": 800,
+       "y": 490,
+       "w": 260,
+       "h": 30,
+       "color": "#FF9AA0A6",
+       "font_size": 13,
+       "align": "Left"
+      },
+      {
+       "type": "text",
+       "text": "CONFERENCE PC",
+       "x": 760,
+       "y": 560,
+       "w": 300,
+       "h": 30,
+       "color": "#FFFFFFFF",
+       "font_size": 18,
+       "align": "Left"
+      },
+      {
+       "type": "control",
+       "component": "ROOM_MODE",
+       "control": "PcConnectedLed",
+       "x": 760,
+       "y": 600,
+       "w": 30,
+       "h": 30,
+       "color": "#FF4CAF50"
+      },
+      {
+       "type": "text",
+       "text": "PC connected",
+       "x": 800,
+       "y": 600,
+       "w": 120,
+       "h": 30,
+       "color": "#FF9AA0A6",
+       "font_size": 13,
+       "align": "Left"
+      },
+      {
+       "type": "control",
+       "component": "ROOM_MODE",
+       "control": "InCallLed",
+       "x": 920,
+       "y": 600,
+       "w": 30,
+       "h": 30,
+       "color": "#FF4CAF50"
+      },
+      {
+       "type": "text",
+       "text": "In a call",
+       "x": 960,
+       "y": 600,
+       "w": 100,
+       "h": 30,
+       "color": "#FF9AA0A6",
+       "font_size": 13,
+       "align": "Left"
+      },
+      {
+       "type": "control",
+       "component": "ROOM_MODE",
+       "control": "CallStatus",
+       "x": 760,
+       "y": 640,
+       "w": 300,
+       "h": 34,
+       "style": "Text",
+       "color": "#FF2B2D33",
+       "text_color": "#FFFFFFFF",
+       "font_size": 14,
+       "corner_radius": 6
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}
