@@ -31,6 +31,8 @@ It works with Designer **9.x** and **10.x**, and has been tested with 9.13.1 and
 
 ## Install
 
+The commands below use `uvx`, which comes with [uv](https://docs.astral.sh/uv/). If you don't have it, install it first (`winget install astral-sh.uv`) and restart your terminal or Claude app so it's on PATH. Without it, the client reports the server as failing with "Connection closed".
+
 ### Claude Code
 
 ```bash
