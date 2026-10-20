@@ -127,9 +127,10 @@ def build_design(spec: dict, path: str, overwrite: bool = False, designer_versio
 @tool(READ_ONLY)
 def read_design(path: str, components: list[str] | None = None, sections: list[str] | None = None) -> dict:
     """Read a saved .qsys back: core, USB, inventory, pages, every component (class, name, Script Access,
-    properties, stored values with positions, pins), wires and UCIs. Uses the Designer version that
-    saved the file. Filter with components=[names] and sections (any of properties, values, pins,
-    wires, ucis) for big designs. Works on any design, not only ones built here."""
+    properties, stored values with positions, pins with any Signal Name), wires, Signal Names
+    (signals: name, source, targets) and UCIs. Uses the Designer version that saved the file. Filter
+    with components=[names] and sections (any of properties, values, pins, wires, signals, ucis;
+    signals come with wires) for big designs. Works on any design, not only ones built here."""
     d = designs.read(path)
     return designs.summarise(d, components, set(sections) if sections else None)
 
@@ -140,6 +141,7 @@ def check_design(path: str, paths: list[dict] | None = None, allow_unconnected: 
     and signal-path rules over the actual wiring, e.g.
     {"from": "FLEX_IN.out.3", "to": "USB_TX_CONF", "expect": false, "via": [...], "name": "..."}.
     'to' can be a component or a pin. An AEC's Reference input counts as subtracted, not passed on.
+    A Signal Name connects its source to every input carrying it, and must have exactly one source.
     allow_unconnected lists pins or components whose spare pins are intended."""
     return designs.check(designs.read(path), paths, allow_unconnected)
 

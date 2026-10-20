@@ -88,3 +88,118 @@ def test_check_flags_missing_positions():
     d["components"][0]["values"] = {"gain": {"value": -6, "position": None}}
     r = designs.check(d)
     assert not next(x for x in r["results"] if x["check"] == "every stored value has a position")["pass"]
+
+
+# ---- Signal Names ---------------------------------------------------------------------------
+
+def gains(*names):
+    return [{"name": n, "class": "gain"} for n in names]
+
+
+def test_validate_accepts_signal_names():
+    spec = {"components": gains("MIX", "AEC", "SPK", "AMP"), "wires": [
+        ["MIX.out.4", "AEC.in.Reference", "AEC REF"],
+        {"from": "MIX.out.4", "to": "SPK.in.1", "signal": "aec ref"},  # same source, names aren't case sensitive
+        ["MIX.out.4", "AMP.in.1"],                                    # a source can also have wires
+        {"from": "MIX.out.1", "to": "AMP.in.2"},
+    ]}
+    prepared, problems = designs.validate(spec)
+    assert not problems, problems
+    assert prepared["wires"][0] == ["MIX.out.4", "AEC.in.Reference", "AEC REF"]
+
+
+def test_validate_reports_signal_problems():
+    spec = {"components": gains("A", "B", "C", "D"), "wires": [
+        ["A.out.1", "B.in.1", ""],                              # 0: empty name
+        {"from": "A.out.1", "to": "B.in.1", "signal": 5},       # 1: not a string
+        ["A.out.1", "B.in.1", "X", "Y"],                        # 2: too long
+        ["A.out.1", "B.in.1", "ONE"],                           # 3
+        ["A.out.1", "C.in.1", "TWO"],                           # 4: A.out.1 already carries ONE
+        ["D.out.1", "C.in.2", "one"],                           # 5: ONE already comes from A.out.1
+        ["B.out.1", "D.in.1"],                                  # 6
+        ["A.out.1", "D.in.1", "ONE"],                           # 7: D.in.1 already has a wire
+        ["C.out.1", "A.in.1", "THREE"],                         # 8
+        ["B.out.1", "A.in.1"],                                  # 9: A.in.1 already takes THREE
+        ["D.out.2", "B.in.1", "FOUR"],                          # 10: B.in.1 already takes ONE
+    ]}
+    _, problems = designs.validate(spec)
+    assert len(problems) == 8, problems
+    text = "\n".join(problems)
+    for expected in ("wires[0]: the signal name must be a non-empty string, not ''",
+                     "wires[1]: the signal name must be a non-empty string, not 5",
+                     "wires[2]: expected [from, to] or [from, to, signal]",
+                     "wires[4]: A.out.1 already carries signal 'ONE' (wires[3])",
+                     "wires[5]: signal 'one' already comes from A.out.1 (wires[3]); a name has one source (names are not case sensitive)",
+                     "wires[7]: D.in.1 already has a wire (wires[6])",
+                     "wires[9]: A.in.1 already takes signal 'THREE' (wires[8])",
+                     "wires[10]: B.in.1 already takes signal 'ONE' (wires[3])"):
+        assert expected in text
+
+
+def test_validate_signal_pins_by_number_and_name():
+    spec = {"components": gains("A", "B", "C"), "wires": [
+        ["A.out.1", "B.in.1", "N"],
+        ["A.out.Output", "C.in.1", "N"],     # may be A.out.1: left to the build, which resolves pin names
+        ["A.out.2", "C.in.2", "N"],          # surely another pin
+    ]}
+    _, problems = designs.validate(spec)
+    assert problems == ["wires[2]: signal 'N' already comes from A.out.1 (wires[0]); a name has one source"]
+
+
+def labelled(d, labels):
+    """Give pins signal names, e.g. {"MIX.out.1": "AEC REF"}."""
+    for ref, name in labels.items():
+        cname, d_, index = ref.split(".")
+        c = next(c for c in d["components"] if c["name"] == cname)
+        next(p for p in c["pins"] if p["dir"] == d_ and p["index"] == int(index))["signal"] = name
+    return d
+
+
+def signal_design():
+    """The far end reaches the AEC's reference and the speaker through a signal name, with no wires."""
+    mic, far, spk = comp("MIC"), comp("FAR"), comp("SPK")
+    mix = comp("MIX", "mixer", (("in", 1, "Input 1"), ("out", 1, "Output 1")))
+    aec = comp("AEC", "acoustic_echo_canceler_simd",
+               (("in", 1, "Microphone"), ("in", 2, "Reference"), ("out", 1, "Conference")))
+    tx = comp("TX", "usb_transmitter", (("in", 1, "Channel 1"),))
+    d = design([mic, far, mix, aec, tx, spk], [["MIC.out.1", "AEC.in.1"], ["FAR.out.1", "MIX.in.1"], ["AEC.out.1", "TX.in.1"]])
+    return labelled(d, {"MIX.out.1": "AEC REF", "AEC.in.2": "aec ref", "SPK.in.1": "AEC REF"})
+
+
+def test_check_follows_signal_names():
+    r = designs.check(signal_design(), [
+        {"from": "FAR", "to": "SPK"},
+        {"from": "FAR", "to": "AEC.in.Reference"},
+        {"from": "FAR", "to": "TX", "expect": False},   # the reference is subtracted, not passed on
+        {"from": "MIC", "to": "TX", "via": ["AEC"]},
+    ], allow_unconnected=["MIC.in.1", "FAR.in.1", "SPK.out.1"])
+    assert r["failed"] == 0, r["results"]
+    by = {x["check"]: x for x in r["results"]}
+    assert by["signal names: one source each"]["detail"] == "1 names"
+
+
+def test_check_without_signal_names():
+    by = {x["check"]: x for x in designs.check(aec_design())["results"]}
+    assert by["signal names: one source each"] == {"check": "signal names: one source each", "pass": True, "detail": "none"}
+
+
+def test_check_flags_signal_names_without_one_source():
+    d = signal_design()
+    d["components"].append(comp("REC"))
+    labelled(d, {"FAR.out.1": "aec ref", "REC.in.1": "LOST"})
+    by = {x["check"]: x for x in designs.check(d)["results"]}
+    one = by["signal names: one source each"]
+    assert not one["pass"]
+    assert sorted(one["detail"]) == ["LOST: no source", "aec ref: 2 sources (FAR.out.1, MIX.out.1)"]
+    loose = by["no unexpected unconnected pins"]["detail"]
+    assert "REC.in.1 (Input)" in loose and "SPK.in.1 (Input)" not in loose
+
+
+def test_summarise_keeps_signals():
+    d = signal_design()
+    d.update(ucis=[], signals=[{"name": "AEC REF", "source": "MIX.out.1", "targets": ["AEC.in.2", "SPK.in.1"]}])
+    assert designs.summarise(d)["signals"] == d["signals"]
+    assert designs.summarise(d, ["SPK"])["signals"] == d["signals"]
+    assert designs.summarise(d, ["MIC"])["signals"] == []
+    assert designs.summarise(d, include={"wires"})["signals"] == d["signals"]
+    assert "signals" not in designs.summarise(d, include={"pins"})

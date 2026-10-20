@@ -14,7 +14,7 @@ using System.Linq;
 using System.Reflection;
 using Newtonsoft.Json.Linq;
 
-static class QsysHelper
+static partial class QsysHelper
 {
     // Main must not touch Newtonsoft types: they load from the Designer folder, and the resolver
     // for that folder is only installed by Q.Init. The JSON work happens in Run().
@@ -153,7 +153,12 @@ static class QsysHelper
         {
             int i = 0;
             foreach (var p in Q.Pins(comp, dir))
-                arr.Add(new JObject { { "dir", dir == "Input" ? "in" : "out" }, { "index", ++i }, { "name", Q.PinName(p) } });
+            {
+                var o = new JObject { { "dir", dir == "Input" ? "in" : "out" }, { "index", ++i }, { "name", Q.PinName(p) } };
+                var signal = SignalName(p);
+                if (signal != null) o["signal"] = signal;
+                arr.Add(o);
+            }
         }
         return arr;
     }
@@ -395,8 +400,9 @@ static class QsysHelper
             foreach (var kv in values) valuesOut.Add(StoreValue(c, kv.Key, kv.Value, cache));
         }
 
-        // wires
+        // wires (one that names a signal labels its two pins instead: QsysHelper.Signals.cs)
         int wireCount = 0;
+        var signals = new SignalPlan();
         foreach (var w in (spec["wires"] as JArray ?? new JArray()))
         {
             string from, to;
@@ -406,6 +412,7 @@ static class QsysHelper
             var b = ResolvePin(comps, to, "Input");
             if (Q.F(a, "Domain").ToString() != Q.F(b, "Domain").ToString())
                 throw new Exception("wire " + from + " -> " + to + ": pin types differ (" + Q.F(a, "Domain") + " vs " + Q.F(b, "Domain") + ")");
+            if (signals.Take(w, from, to, a, b)) continue;
             var pa = compPage[Q.F(a, "Provider")]; var pb = compPage[Q.F(b, "Provider")];
             if (pa != pb) throw new Exception("wire " + from + " -> " + to + " crosses pages (" + pa + " / " + pb + "); Q-SYS wires must stay on one page");
             var wire = Activator.CreateInstance(Q.T("QSC.QSys.Design.Wire"), true);
@@ -414,6 +421,7 @@ static class QsysHelper
             Q.Call(Q.L(Q.Get(pages[pa], "Layers"))[0], "AddChild", wire);
             wireCount++;
         }
+        int signalCount = signals.Apply();
 
         // UCIs
         int uciElements = 0;
@@ -425,7 +433,7 @@ static class QsysHelper
         return new JObject {
             { "path", path }, { "bytes", new FileInfo(path).Length }, { "designer_version", DesignerVersion() },
             { "core", Convert.ToString(Q.Get(core, "CoreModelPretty")) }, { "components", comps.Count }, { "wires", wireCount },
-            { "uci_elements", uciElements }, { "values", valuesOut }, { "warnings", warnings } };
+            { "signals", signalCount }, { "uci_elements", uciElements }, { "values", valuesOut }, { "warnings", warnings } };
     }
 
     // "NAME.out.3", "NAME.in.2", "NAME.in.Reference" (pin name, case-insensitive)
@@ -715,6 +723,7 @@ static class QsysHelper
         }
         res["components"] = compsOut;
         res["wires"] = new JArray(wires.Select(w => new JArray(Ref(Q.Get(w, "PinA")), Ref(Q.Get(w, "PinB")))));
+        res["signals"] = ReadSignals(comps, Ref);
         var byId = comps.ToDictionary(c => Convert.ToString(Q.Get(c, "Id")), c => c);
         var ucis = new JArray();
         foreach (var panel in Q.L(Q.Get(doc, "WebPanels")))

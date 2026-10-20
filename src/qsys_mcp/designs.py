@@ -66,23 +66,75 @@ def validate(spec: dict, base_dir: str | Path | None = None) -> tuple[dict, list
                 chk = lua.check_syntax(tc["lua"])
                 if not chk["ok"]:
                     problems.append(f"{name}: Lua syntax error: {chk.get('error')}")
-    for i, w in enumerate(spec.get("wires", [])):
-        ends = w if isinstance(w, list) else [w.get("from"), w.get("to")]
-        if len(ends) != 2:
-            problems.append(f"wires[{i}]: expected [from, to]")
-            continue
-        for end, d in zip(ends, ("out", "in")):
-            m = ENDPOINT_RE.match(end or "")
-            if not m or m["dir"] != d:
-                problems.append(f"wires[{i}]: {end!r} should look like NAME.{d}.N or NAME.{d}.PinName")
-            elif m["name"] not in names:
-                problems.append(f"wires[{i}]: no component {m['name']}")
+    _validate_wires(spec.get("wires", []), names, problems)
     for u in spec.get("ucis", []):
         for p in u.get("pages", []):
             for j, e in enumerate(p.get("elements", [])):
                 if e.get("type", "control") == "control" and e.get("component") not in names:
                     problems.append(f"UCI {u.get('name')}/{p.get('name')} element {j}: no component {e.get('component')}")
     return spec, problems
+
+
+def _validate_wires(wires: list, names: set[str], problems: list[str]) -> None:
+    """Wires are [from, to], or [from, to, signal] / {"from", "to", "signal"} for a Signal Name.
+    A name has one source, an output carries one name, and an input takes one wire or one name."""
+    fed: dict[tuple, tuple] = {}      # input pin -> (signal or None, wire index)
+    carries: dict[tuple, tuple] = {}  # output pin -> (signal, wire index)
+    sources: dict[str, tuple] = {}    # signal, case-folded -> (output pin, endpoint, signal, wire index)
+    for i, w in enumerate(wires):
+        if isinstance(w, dict):
+            ends, named, signal = [w.get("from"), w.get("to")], "signal" in w, w.get("signal")
+        elif isinstance(w, list) and len(w) in (2, 3):
+            ends, named, signal = w[:2], len(w) == 3, w[2] if len(w) == 3 else None
+        else:
+            problems.append(f"wires[{i}]: expected [from, to] or [from, to, signal]")
+            continue
+        ok = True
+        if named and not (isinstance(signal, str) and signal.strip()):
+            problems.append(f"wires[{i}]: the signal name must be a non-empty string, not {signal!r}")
+            ok = False
+        for end, d in zip(ends, ("out", "in")):
+            m = ENDPOINT_RE.match(end if isinstance(end, str) else "")
+            if not m or m["dir"] != d:
+                problems.append(f"wires[{i}]: {end!r} should look like NAME.{d}.N or NAME.{d}.PinName")
+                ok = False
+            elif m["name"] not in names:
+                problems.append(f"wires[{i}]: no component {m['name']}")
+                ok = False
+        if not ok:
+            continue
+        src, dst = _pin_key(ends[0]), _pin_key(ends[1])
+        if not named:
+            prev = fed.setdefault(dst, (None, i))
+            if prev[0] is not None:
+                problems.append(f"wires[{i}]: {ends[1]} already takes signal {prev[0]!r} (wires[{prev[1]}]); "
+                                "an input takes one wire or one signal name")
+            continue
+        key = signal.casefold()
+        prev = carries.setdefault(src, (signal, i))
+        if prev[0].casefold() != key:
+            problems.append(f"wires[{i}]: {ends[0]} already carries signal {prev[0]!r} (wires[{prev[1]}]); "
+                            "an output carries one name")
+        prev = sources.setdefault(key, (src, ends[0], signal, i))
+        if _differ(prev[0], src):
+            problems.append(f"wires[{i}]: signal {signal!r} already comes from {prev[1]} (wires[{prev[3]}]); a name has one source"
+                            + ("" if prev[2] == signal else " (names are not case sensitive)"))
+        prev = fed.setdefault(dst, (signal, i))
+        if prev[0] is None:
+            problems.append(f"wires[{i}]: {ends[1]} already has a wire (wires[{prev[1]}]); an input takes one wire or one signal name")
+        elif prev[0].casefold() != key:
+            problems.append(f"wires[{i}]: {ends[1]} already takes signal {prev[0]!r} (wires[{prev[1]}])")
+
+
+def _pin_key(end: str) -> tuple:
+    """A wire endpoint as (component, dir, pin number or lower-case pin name)."""
+    m = ENDPOINT_RE.match(end)
+    return m["name"], m["dir"], int(m["pin"]) if m["pin"].strip().isdecimal() else m["pin"].lower()
+
+
+def _differ(a: tuple, b: tuple) -> bool:
+    """Surely different pins? A pin number and a pin name on the same block may be the same pin."""
+    return a[:2] != b[:2] or (type(a[2]) is type(b[2]) and a[2] != b[2])
 
 
 def build(spec: dict, path: str, overwrite: bool = False, designer_version: str | None = None,
@@ -123,8 +175,8 @@ def read(path: str, designer_version: str | None = None) -> dict:
 
 
 def summarise(design: dict, components: list[str] | None = None, include: set[str] | None = None) -> dict:
-    """Trim a read-back for display: optional component filter and sections."""
-    include = include or {"properties", "values", "pins", "wires", "ucis"}
+    """Trim a read-back for display: optional component filter and sections (signals come with wires)."""
+    include = include or {"properties", "values", "pins", "wires", "signals", "ucis"}
     d = {k: design[k] for k in ("path", "bytes", "designer", "saved_by", "core", "usb_slots", "inventory", "pages") if k in design}
     comps = design["components"]
     if components:
@@ -135,6 +187,10 @@ def summarise(design: dict, components: list[str] | None = None, include: set[st
         d["wires"] = design["wires"] if not components else [w for w in design["wires"]
                                                              if any(w[0].startswith(n + ".") or w[1].startswith(n + ".") for n in components)]
     d["wire_count"] = len(design["wires"])
+    if "signals" in design and include & {"wires", "signals"}:
+        d["signals"] = design["signals"] if not components else [
+            s for s in design["signals"] if any(r and r.startswith(n + ".") for n in components
+                                                for r in [s.get("source"), *s["targets"], *s.get("extra_sources", [])])]
     if "ucis" in include:
         d["ucis"] = design["ucis"]
     return d
@@ -154,7 +210,25 @@ def _graph(design: dict):
             if (c["class"], i["name"]) in NON_PASSING:
                 continue
             edges.setdefault(f"{c['name']}.in.{i['index']}", []).extend(f"{c['name']}.out.{o['index']}" for o in outs)
+    for g in _signals(design).values():
+        for s in g["sources"]:
+            edges.setdefault(s, []).extend(g["targets"])
     return by_name, edges
+
+
+def _signals(design: dict) -> dict[str, dict]:
+    """Signal Names from the pins' labels: case-folded name -> {name, sources, targets} (pin refs).
+    Q-SYS names aren't case sensitive; the group keeps its source's spelling."""
+    groups: dict[str, dict] = {}
+    for c in design["components"]:
+        for p in c["pins"]:
+            if not p.get("signal"):
+                continue
+            g = groups.setdefault(p["signal"].casefold(), {"name": p["signal"], "sources": [], "targets": []})
+            if p["dir"] == "out" and not g["sources"]:
+                g["name"] = p["signal"]
+            g["sources" if p["dir"] == "out" else "targets"].append(f"{c['name']}.{p['dir']}.{p['index']}")
+    return groups
 
 
 def _pins(by_name: dict, ref: str) -> list[str]:
@@ -190,8 +264,11 @@ def check(design: dict, paths: list[dict] | None = None, allow_unconnected: list
       'to' may be a component (any of its inputs) or a pin; expect defaults to true.
       AEC Reference inputs don't pass signal (the AEC subtracts them), so a far-end feed reaching
       a reference doesn't count as reaching the AEC's output.
-    allow_unconnected: pins or components whose unconnected pins are intended (spare I/O etc.)."""
+    allow_unconnected: pins or components whose unconnected pins are intended (spare I/O etc.).
+    A Signal Name connects its source (the output carrying it) to every input carrying it, for the
+    unconnected-pins check and for paths, and each name must have exactly one source."""
     by_name, edges = _graph(design)
+    groups = _signals(design)
     results = []
 
     names = [c["name"] for c in design["components"]]
@@ -199,12 +276,20 @@ def check(design: dict, paths: list[dict] | None = None, allow_unconnected: list
     results.append({"check": "component names unique", "pass": not dupes, "detail": dupes or f"{len(names)} names"})
 
     connected = {p for w in design["wires"] for p in w}
+    for g in groups.values():
+        if g["sources"] and g["targets"]:
+            connected.update(g["sources"] + g["targets"])
     allowed = set()
     for a in allow_unconnected or []:
         allowed.update(_pins(by_name, a))
     loose = [f"{c['name']}.{p['dir']}.{p['index']} ({p['name']})" for c in design["components"] for p in c["pins"]
              if f"{c['name']}.{p['dir']}.{p['index']}" not in connected and f"{c['name']}.{p['dir']}.{p['index']}" not in allowed]
     results.append({"check": "no unexpected unconnected pins", "pass": not loose, "detail": loose[:60] or "none"})
+
+    bad = [f"{g['name']}: " + (f"{len(g['sources'])} sources ({', '.join(g['sources'])})" if g["sources"] else "no source")
+           for g in groups.values() if len(g["sources"]) != 1]
+    results.append({"check": "signal names: one source each", "pass": not bad,
+                    "detail": bad or (f"{len(groups)} names" if groups else "none")})
 
     nan = [f"{c['name']}.{k}" for c in design["components"] for k, v in c.get("values", {}).items()
            if "value" in v and v.get("position") is None]

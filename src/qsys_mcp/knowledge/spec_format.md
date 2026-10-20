@@ -9,7 +9,7 @@
   "inventory": [{"type": "SoftDanteInput", "name": "Stage-Dante"}],
   "pages": ["Audio", "Control"],
   "components": [ ... ],
-  "wires": [ ["A.out.1", "B.in.1"], ... ],
+  "wires": [ ["A.out.1", "B.in.1"], ["A.out.2", "C.in.1", "PGM L"], ... ],
   "ucis": [ ... ]
 }
 ```
@@ -74,6 +74,18 @@ Write each wire as `["FROM.out.N", "TO.in.M"]`. A pin can be given by its 1-base
 - Each input takes one wire.
 - Both ends must be on the same page.
 
+### Signal names
+
+A third element connects the two pins by a Q-SYS Signal Name instead of a wire: `["FAR_END_MIX.out.4", "AEC_01.in.Reference", "AEC REF"]`, or `{"from": "FAR_END_MIX.out.4", "to": "AEC_01.in.Reference", "signal": "AEC REF"}`. Both pins get the name and no wire is drawn, the same as Designer's "Convert to Signal Names". Designer connects every pin that carries the same name.
+
+- A name has one source (an output) and any number of destinations. Repeat the entry for each destination, with the same source. The source is only labelled once.
+- Names are not case sensitive: `AEC REF` and `aec ref` are the same signal.
+- An output carries one name. It can have wires as well.
+- An input takes one wire or one name, not both.
+- Signal names can join pins on different pages.
+
+`read_design` gives each labelled pin a `signal`, and lists every name under `signals` with its `source` and `targets`. `check_design` counts a name as a connection from its source to each destination, and checks that every name has exactly one source.
+
 ## ucis
 
 ```json
@@ -98,6 +110,6 @@ Write each wire as `["FROM.out.N", "TO.in.M"]`. A pin can be given by its 1-base
 Two tools check a built design:
 
 - `read_design` reads a saved file back.
-- `check_design` runs static checks on it: unique names, unconnected pins, stored positions, and signal paths. Signal paths are written as `{"from": "FLEX_IN.out.3", "to": "USB_TX_CONF", "expect": false}`, with optional `via: [...]`. An AEC's Reference input counts as subtracted, not passed through.
+- `check_design` runs static checks on it: unique names, unconnected pins, one source per signal name, stored positions, and signal paths. Signal paths are written as `{"from": "FLEX_IN.out.3", "to": "USB_TX_CONF", "expect": false}`, with optional `via: [...]`. An AEC's Reference input counts as subtracted, not passed through.
 
 For control logic, use `emulate_design` and then the `qrc_*` tools. Emulation has no audio: it can test control state, but not whether sound actually gets through.
