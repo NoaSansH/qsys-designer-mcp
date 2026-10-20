@@ -81,7 +81,8 @@ def tool(annotations: ToolAnnotations, *, image: bool = False):
 def designer_versions(version: str | None = None) -> dict:
     """Installed Q-SYS Designer versions (newest first), and for the chosen one (default: newest):
     the core models and inventory item types it knows, the inventory types with a USB bridge
-    (usb_bridge_types: speakerphone, sound card, video bridge) and the helper's features."""
+    (usb_bridge_types: speakerphone, sound card, video bridge), the helper's features, and the
+    installed plugins (name, id, version, file) a spec's "plugin" can name."""
     found = headless.installs()
     if not found:
         raise headless.HelperError("No Q-SYS Designer installation found (set QSYS_DESIGNER_DIR if it's somewhere unusual).")
@@ -93,7 +94,8 @@ def designer_versions(version: str | None = None) -> dict:
 @tool(READ_ONLY)
 def probe_components(classes: list[dict] | None = None, core_model: str | None = None, usb_sound_cards: int | None = None,
                      inventory: list[dict] | None = None, include_placeables: bool = False, include_controls: bool = True,
-                     designer_version: str | None = None, core: dict | None = None, include_hardware: bool = False) -> dict:
+                     plugins: list[dict | str] | None = None, designer_version: str | None = None,
+                     core: dict | None = None, include_hardware: bool = False) -> dict:
     """Learn component classes before using them. classes: [{"class": "mixer", "properties": {"n_inputs": 4}}]
     returns each class's resolved properties, pins (number, name, domain) and controls (id, type, min/max,
     and under "pin" the control pin directions it offers). A class can also take "control_pins" as in a
@@ -104,7 +106,8 @@ def probe_components(classes: list[dict] | None = None, core_model: str | None =
     (core: {"model", "set", "usb"}; items: {"type", "name", "set", "usb"}), so their blocks can be seen
     before building; each item comes back with its settable properties (enums with their choices).
     include_hardware adds what can be set on the Core, its USB bridge and slots, and the design
-    (design.set: PTP, QoS, MTU, Software Dante). Nothing is written."""
+    (design.set: PTP, QoS, MTU, Software Dante). plugins: [{"plugin": "Name or id", "properties": {...}}]
+    does the same for installed plugins (see designer_versions). Nothing is written."""
     if core or inventory:
         _, problems = designs.validate({"core": core or {}, "inventory": inventory or [], "usb_sound_cards": usb_sound_cards})
         if problems:
@@ -125,9 +128,11 @@ def probe_components(classes: list[dict] | None = None, core_model: str | None =
     inst = headless.pick(designer_version)
     if core or include_hardware or designs.uses_hardware({"inventory": inventory or []}):
         designs.require_hardware(inst)
+    if plugins:
+        req["plugins"] = [p if isinstance(p, dict) else {"plugin": p} for p in plugins]
     out = headless.run(req, inst)
     if not include_controls:
-        for c in out.get("classes", []):
+        for c in out.get("classes", []) + out.get("plugins", []):
             c.pop("controls", None)
     return out
 
@@ -151,8 +156,9 @@ def read_design(path: str, components: list[str] | None = None, sections: list[s
     own settings (PTP, QoS, MTU...), USB slots, inventory (each item's settings and USB), pages, every
     component (class, name, Script Access, properties, stored values with positions, pins with their domain
     and any Signal Name, control_pins), wires, Signal Names (signals: name, source, targets), schematic
-    graphics (text, headers, group boxes), UCIs and snapshot banks (members, controller block, which
-    snapshots hold data). Uses the Designer version that saved the file. Filter with components=[names]
+    graphics (text, headers, group boxes), UCIs, snapshot banks (members, controller block, which
+    snapshots hold data) and the plugins used (plugin blocks also get plugin
+    {name, id, version, encrypted}). Uses the Designer version that saved the file. Filter with components=[names]
     and sections (any of properties, values, pins, wires, signals, graphics, ucis, settings, snapshots;
     signals come with wires) for big designs. Works on any design, not only ones built here."""
     d = designs.read(path)

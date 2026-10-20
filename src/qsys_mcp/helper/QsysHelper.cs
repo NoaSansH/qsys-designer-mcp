@@ -4,7 +4,7 @@
 //
 //   qhelper.exe <designer-dir> <request.json> <response.json>
 //
-// Commands (request "command"): info, probe, build, read, set_values, copy.
+// Commands (request "command"): info, probe, build, read, set_values, copy, plugin_members.
 // Uses Designer internals that are not a public API; see the README's licensing note.
 using System;
 using System.Collections;
@@ -64,6 +64,7 @@ static partial class QsysHelper
             case "read": return Read((string)req["path"]);
             case "set_values": return SetValues(req);
             case "copy": return Copy(req);
+            case "plugin_members": return QPlugins.Members();
             default: throw new Exception("unknown command " + req["command"]);
         }
     }
@@ -186,6 +187,7 @@ static partial class QsysHelper
             { "core_models", new JArray(Enum.GetNames(coreModelType)) },
             { "inventory_types", new JArray(InventoryTypes().Select(t => t.Name)) } };
         QHardware.AddInfo(res, core, InventoryTypes());   // features, usb_api, usb_bridge_types
+        QPlugins.ListInto(res);
         return res;
     }
     static object _unused;
@@ -258,10 +260,42 @@ static partial class QsysHelper
         if ((bool?)req["hardware"] == true) res["hardware"] = QHardware.Discover(doc, core, InventoryTypes());
         if (QHardware.Applied.Count > 0) res["applied"] = QHardware.Applied;
         if (QHardware.Warnings.Count > 0) res["warnings"] = QHardware.Warnings;
+        if (req["plugins"] != null) res["plugins"] = ProbePlugins((JArray)req["plugins"]);
         return res;
     }
 
-    static object Scalar(JToken t)
+    // [{plugin, properties}] (or bare names) -> the installed plugin used, and its properties, pins and controls
+    static JArray ProbePlugins(JArray specs)
+    {
+        var plugins = new JArray();
+        foreach (var t in specs)
+        {
+            var spec = t as JObject ?? new JObject { { "plugin", t } };
+            var o = new JObject { { "plugin", spec["plugin"] } };
+            try
+            {
+                var warnings = new JArray();
+                JObject installed;
+                var c = QPlugins.Create(spec["plugin"], spec["properties"] as JObject, "probe", warnings, out installed);
+                o["installed"] = installed;
+                o["class"] = (string)Q.Get(c, "ClassName");
+                var fp = Q.TryGet(c, "FPClassName") ?? Q.TryF(c, "_FPClassName");
+                if (fp != null) o["fp_class"] = Convert.ToString(fp);
+                o["label"] = Convert.ToString(Q.Get(c, "Label"));
+                var props = Props(c);
+                QPlugins.HideSource(props);
+                o["properties"] = props;
+                o["pins"] = PinInfo(c);
+                o["controls"] = ControlInfo(c);
+                if (warnings.Count > 0) o["warnings"] = warnings;
+            }
+            catch (Exception e) { o["error"] = (e.InnerException ?? e).Message; }
+            plugins.Add(o);
+        }
+        return plugins;
+    }
+
+    internal static object Scalar(JToken t)
     {
         switch (t.Type)
         {
@@ -363,6 +397,7 @@ static partial class QsysHelper
                 if (owner == null) throw new Exception(name + ": no inventory item '" + itemName + "'");
                 c = QHardware.Place(owner, placeable, invSpec.Type == JTokenType.Object ? (string)invSpec["class"] : null);
             }
+            else if (cs["plugin"] != null) c = QPlugins.Create(cs["plugin"], cs["properties"] as JObject, name, warnings);
             else
             {
                 c = Q.NewComponent((string)cs["class"]);
@@ -715,6 +750,8 @@ static partial class QsysHelper
             var pos = (System.Windows.Point)Q.Get(c, "Position");
             o["x"] = pos.X; o["y"] = pos.Y;
             o["properties"] = Props(c);
+            var plugin = QPlugins.Describe(c, (JObject)o["properties"]);
+            if (plugin != null) o["plugin"] = plugin;
             var vals = new JObject();
             var cached = (IDictionary)Q.Get(c, "CachedControlValues");
             foreach (var k in cached.Keys)

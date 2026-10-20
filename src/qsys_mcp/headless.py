@@ -19,7 +19,7 @@ from importlib import resources
 from pathlib import Path
 
 CSC = Path(os.environ.get("WINDIR", r"C:\Windows")) / r"Microsoft.NET\Framework64\v4.0.30319\csc.exe"
-HELPER_SOURCES = ("QCommon.cs", "QControlPins.cs", "QHardware.cs", "QSnapshots.cs", "QsysHelper.cs",
+HELPER_SOURCES = ("QCommon.cs", "QControlPins.cs", "QHardware.cs", "QPlugins.cs", "QSnapshots.cs", "QsysHelper.cs",
                   "QsysHelper.Graphics.cs", "QsysHelper.Signals.cs", "QUci.cs")
 QSC_ROOTS = [Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "QSC",
              Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")) / "QSC"]

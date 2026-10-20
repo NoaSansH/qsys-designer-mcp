@@ -27,6 +27,7 @@
     <Compile Include="../src/qsys_mcp/helper/QHardware.cs" />
     <Compile Include="../src/qsys_mcp/helper/QControlPins.cs" />
     <Compile Include="../src/qsys_mcp/helper/QSnapshots.cs" />
+    <Compile Include="../src/qsys_mcp/helper/QPlugins.cs" />
     <Compile Include="../src/qsys_mcp/helper/QsysHelper.cs" />
     <Compile Include="../src/qsys_mcp/helper/QUci.cs" />
     <Compile Include="../src/qsys_mcp/helper/QsysHelper.Signals.cs" />

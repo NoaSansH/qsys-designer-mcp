@@ -10,6 +10,7 @@ An MCP server that lets Claude, or any other MCP client, build Q-SYS designs. Yo
 
 - **Build designs headlessly.** A JSON spec in, a `.qsys` file out, in about a second, with no Designer window. It supports:
   - components by class name and their properties
+  - installed plugins, by name or id, and their properties
   - Core and inventory I/O: Flex, Mic/Line, USB audio and HID, Software Dante, AES67
   - hardware settings: USB speakerphone, sound cards and video bridge on the Core or an I/O-USB Bridge, device properties such as a camera's model, and the design's PTP, QoS, MTU and Software Dante settings
   - wires, by pin number or pin name
@@ -146,7 +147,7 @@ There are three resources, `qsys://spec-format`, `qsys://lua-api` and `qsys://de
 
 - Emulation has no audio. It can't prove that signal flows, that an AEC converges, or that a gate or limiter acts. Signal paths are checked from the wiring.
 - USB HID call control (Teams/Zoom mute sync) can't be tested in emulation, because the PC side can't be simulated.
-- Named controls, signal-name blocks and plugins aren't part of the spec yet. Third-party plugins can't be placed.
+- Named controls aren't part of the spec yet. Plugins must be installed on the machine that builds the design.
 - Designer must be in English. Only menu and dialog names depend on the language.
 - Tested on Designer 9.13.1 and 10.3.0. Other versions should work, but they use the same undocumented internals, so try them on a copy first.
 

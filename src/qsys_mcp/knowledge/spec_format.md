@@ -63,13 +63,14 @@ Property names and enum values change between Designer versions. To find them:
 
 ## components
 
-Each component needs exactly one of `class` or `inventory`.
+Each component needs exactly one of `class`, `inventory` or `plugin`.
 
 | key | meaning |
 |---|---|
 | `name` | Required and unique. Becomes the code name (what Lua, QRC and the checks use) and the block's label. Use letters, digits, `_` and `-`, starting with a letter. |
 | `class` | Component class, e.g. `gain`, `mixer`, `acoustic_echo_canceler_simd`. Use `probe_components` to see a class's properties, pins and controls before using it. |
 | `inventory` | A placeable from the Core or an inventory item: `"Flex In"`, `"USB Sound Card 1 Out"`, `"HID Conferencing"`, or `{"item": "Stage-Dante", "placeable": "..."}`. `{"item": "IO-USB-1", "class": "usb_receiver"}` takes the item's block of that class, and `{"item": "Cam-1"}` an item's only block. Without `item`, the Core is used. |
+| `plugin` | An installed plugin, by name or id: `"My Device"`, or `{"name": "Custom~My Device", "version": "1.2"}`. See Plugins below. |
 | `page` | Schematic page (from `pages`). Defaults to the first. Wires can't cross pages. |
 | `x`, `y` | Position on the page. Lay out left to right in signal order, roughly 200 px apart. |
 | `label` | Optional block label (defaults to `name`). |
@@ -122,6 +123,25 @@ A control of any block can show a control pin (Properties > Control Pins in Desi
 - A Text Controller's own controls take `pins` instead (see above).
 - `build_design` lists each control pin it added under `control_pins`, with `route` saying how Designer added it.
 - Control pins are numbered after the block's own pins, in the order they were added (in a build, the order of `control_pins`). Name them in wires rather than numbering them.
+
+### Plugins
+
+`plugin` places a plugin that's installed for Designer, such as a `.qplug` file in `Documents\QSC\Q-Sys Designer\Plugins`. `designer_versions` → `plugins` lists the installed ones with their name, id, version and file. A file that Designer's own plugin list leaves out is marked `"loaded": false` and can't be placed.
+
+```json
+{"name": "DEVICE_1", "plugin": "My Device", "x": 600, "y": 100,
+ "properties": {"Debug Print": "All"},
+ "values": {"IPAddress": "192.168.1.100", "Port": 23},
+ "script_access": "External"}
+```
+
+- `plugin` is the plugin's id, or its name with or without its folder (`"Custom~My Device"` or `"My Device"`). A version at the end of the name can be left out. Case doesn't matter.
+- `{"name": ..., "id": ..., "version": ...}` picks one plugin among several. If more than one version is installed and none is given, the newest is used and the build says so. `"version": "1.4"` matches 1.4.x. A name that fits two different plugins is an error: give the `id`.
+- `properties` are the plugin's own properties, by the names Designer shows (they can contain spaces). They're set in spec order, and the plugin updates itself after each one, as it does in Designer, so one property can change the plugin's other properties, pins and controls. Put such a property (a model or channel count, say) first. The build warns when the plugin changes or rejects a value.
+- `probe_components(plugins=[{"plugin": "My Device", "properties": {...}}])` shows a plugin's properties, pins and controls. Wires, `values` and UCI controls use those names, as for any block.
+- Designer copies the plugin's code into the design, as it does when a plugin is dragged in. The plugin must be installed on the machine that builds the design. `plugin_source` and `plugin_is_encrypted` come from the installed plugin and can't be set.
+- A plugin that isn't installed is an error, which lists the installed ones.
+- `read_design` gives a plugin block's `class` as `%PLUGIN%_` followed by the plugin's id, and adds `plugin`: `{name, id, version, encrypted}`. The name and version come from the code saved in the design, so an encrypted plugin only shows its id. `plugin_source` is shown by its length, not its code. The design's plugins are also listed under `plugins`, with the blocks that use them.
 
 ## wires
 

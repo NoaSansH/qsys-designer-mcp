@@ -24,7 +24,7 @@ def test_validate_reports_problems():
     ], "wires": [["G1.out.1", "MISSING.in.1"], ["G1.in.1", "G1.out.1"]]}
     _, problems = designs.validate(spec)
     text = "\n".join(problems)
-    for expected in ("duplicate name G1", "'bad name'", "exactly one of 'class' or 'inventory'", "page 'Nope'",
+    for expected in ("duplicate name G1", "'bad name'", "exactly one of 'class', 'inventory' or 'plugin'", "page 'Nope'",
                      "script_access", "no component MISSING", "should look like NAME.out"):
         assert expected in text
 
@@ -45,6 +45,54 @@ def test_validate_rejects_bad_lua():
                             "text_controller": {"controls": [], "lua": "function ("}}]}
     _, problems = designs.validate(spec)
     assert any("Lua syntax error" in p for p in problems)
+
+
+def test_validate_accepts_plugins():
+    spec = {"components": [
+        {"name": "DEV_1", "plugin": "My Device", "properties": {"Debug Print": "All"}, "values": {"IPAddress": "192.168.1.100"}},
+        {"name": "DEV_2", "plugin": {"name": "Custom~My Device", "version": "0.1.0"}},
+        {"name": "DEV_3", "plugin": {"id": "6f0c1d2e-0000-4000-8000-000000000001"}},
+    ]}
+    prepared, problems = designs.validate(spec)
+    assert not problems
+    assert prepared["components"][1]["plugin"] == {"name": "Custom~My Device", "version": "0.1.0"}
+
+
+def test_validate_reports_plugin_problems():
+    spec = {"components": [
+        {"name": "A", "plugin": "My Device", "class": "gain"},
+        {"name": "B", "plugin": {"version": "1.0"}},
+        {"name": "C", "plugin": {"name": "My Device", "version": 1.1}},
+        {"name": "D", "plugin": {"name": "My Device", "model": "x"}},
+        {"name": "E", "plugin": ["My Device"]},
+        {"name": "F", "plugin": "My Device", "properties": {"plugin_source": "print(1)", "plugin_is_encrypted": False}},
+        {"name": "G", "class": "%PLUGIN%_my-device"},
+        {"name": "H", "plugin": "   "},
+    ]}
+    _, problems = designs.validate(spec)
+    text = "\n".join(problems)
+    for expected in ("A: give exactly one of 'class', 'inventory' or 'plugin'", "B: plugin needs a name or an id",
+                     "C: plugin version must be a non-empty string", "D: plugin has unknown keys ['model']",
+                     "E: plugin must be the plugin's name or id", "F: property plugin_source comes from the installed plugin",
+                     "F: property plugin_is_encrypted comes from", "G: class '%PLUGIN%_my-device' is a plugin",
+                     '"plugin": {"id": "my-device"}', "H: plugin is empty"):
+        assert expected in text
+
+
+def test_summarise_lists_plugins():
+    info = {"name": "Custom~My Device", "id": "my-device", "version": "0.1.0", "encrypted": False}
+    dev1 = dict(comp("DEV_1", "%PLUGIN%_my-device"), plugin=dict(info),
+                properties={"Debug Print": "All", "plugin_source": "(2048 characters, not shown)"})
+    dev2 = dict(comp("DEV_2", "%PLUGIN%_my-device"), plugin=dict(info))
+    old = dict(comp("DEV_OLD", "%PLUGIN%_my-device"), plugin=dict(info, version="0.0.9"))
+    d = designs.summarise(design([dev1, comp("G"), dev2, old], []), include={"pins"})
+    assert d["plugins"] == [dict(info, components=["DEV_1", "DEV_2"]), dict(info, version="0.0.9", components=["DEV_OLD"])]
+    by = {c["name"]: c for c in d["components"]}
+    assert by["DEV_1"]["plugin"] == info and "properties" not in by["DEV_1"]
+    assert "plugin" not in by["G"]
+    filtered = designs.summarise(design([dev1, comp("G")], []), components=["G"], include={"pins"})
+    assert filtered["plugins"][0]["components"] == ["DEV_1"]   # the design's plugins, whatever is shown
+    assert "plugins" not in designs.summarise(design([comp("G")], []), include={"pins"})
 
 
 def test_build_refuses_existing_file(tmp_path):

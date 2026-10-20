@@ -30,6 +30,14 @@ def test_pick_with_nothing_installed(monkeypatch):
         headless.pick()
 
 
+def test_helper_sources_match_the_net8_project():
+    """Designer 9.x compiles HELPER_SOURCES on first use; the .NET 8 helper must be built from the same files."""
+    root = Path(__file__).parent.parent
+    csproj = (root / "helper-net8" / "QsysHelper.csproj").read_text(encoding="utf-8")
+    assert sorted(re.findall(r'<Compile Include="\.\./src/qsys_mcp/helper/([^"]+)"', csproj)) == sorted(headless.HELPER_SOURCES)
+    assert all((root / "src" / "qsys_mcp" / "helper" / n).is_file() for n in headless.HELPER_SOURCES)
+
+
 def test_positions_cache_roundtrip(monkeypatch, tmp_path):
     monkeypatch.setenv("QSYS_MCP_CACHE", str(tmp_path))
     inst = headless.Install(tmp_path, "9.13.1.0")
