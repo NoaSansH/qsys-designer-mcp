@@ -7,6 +7,7 @@
   "core": {"model": "Core 110f", "name": "Core-1"},
   "usb_sound_cards": 1,
   "inventory": [{"type": "SoftDanteInput", "name": "Stage-Dante"}],
+  "design": {"set": {"MtuValue": 1500}},
   "pages": ["Audio", "Control"],
   "components": [ ... ],
   "wires": [ ["A.out.1", "B.in.1"], ... ],
@@ -14,11 +15,49 @@
 }
 ```
 
-## core, usb_sound_cards, inventory
+## core, usb_sound_cards, inventory, design
 
 - `core.model`: optional. Use a name from `designer_versions` → `core_models`, e.g. `Core110f`. Spaces and case don't matter. The default is Designer's default core (Core 8 Flex).
-- `usb_sound_cards`: optional. The number of USB audio bridge slots on the Core (each is 2 in / 2 out). Each one adds two placeables, `USB Sound Card N In` (audio from the PC) and `USB Sound Card N Out` (audio to the PC).
-- `inventory`: optional extra inventory items. `type` is a class name from `designer_versions` → `inventory_types`. `name` names the item, and `set` sets public properties (e.g. `{"Count": 16}`). Check what an item offers with `probe_components(inventory=[...], include_placeables=true)`.
+- `core.set` and `core.usb`: optional. The Core's own properties and its USB bridge (speakerphone, sound cards, video bridge). See [Hardware settings](#hardware-settings).
+- `usb_sound_cards`: optional. The number of USB audio bridge slots on the Core (each is 2 in / 2 out). Each one adds two placeables, `USB Sound Card N In` (audio from the PC) and `USB Sound Card N Out` (audio to the PC). Give either this or `core.usb`, not both.
+- `inventory`: optional extra inventory items. `type` is a class name from `designer_versions` → `inventory_types`. `name` names the item, `set` sets public properties (e.g. `{"Count": 16}`) and `usb` sets up a device's USB bridge (see [Hardware settings](#hardware-settings)). Check what an item offers with `probe_components(inventory=[...], include_placeables=true)`. Designer drops `_` from item names, so use `-` instead; the spec's name still works in a component's `inventory.item`.
+- `design.set`: optional. The design's own properties: PTP, QoS, MTU, Software Dante. See [Hardware settings](#hardware-settings).
+
+## Hardware settings
+
+Some settings belong to the hardware, not to a block: the Core's USB bridge (speakerphone, sound cards, video bridge), a device's properties (a camera's model, a Software Dante channel count) and the design's network settings (PTP, QoS, MTU, Software Dante). They go in `set` and `usb` blocks.
+
+```json
+{
+  "core": {"model": "Core 110f", "name": "Core-1", "set": {"Location": "Rack A"},
+           "usb": {"type": "speakerphone", "mode": "WithEchoCancel", "video_bridge": true}},
+  "design": {"set": {"PtpDomain": 0, "PtpPriority1": 127, "MtuValue": 1500}},
+  "inventory": [
+    {"type": "IoUsbBridge", "name": "IO-USB-1",
+     "usb": {"type": "speakerphone", "mode": "WithEchoCancel", "video_bridge": true, "set": {"ZRMode": false}}},
+    {"type": "OnVifCamera", "name": "Cam-1", "set": {"Model": "NC-12x80"}},
+    {"type": "SoftDanteInput", "name": "Dante-In", "set": {"ChannelCount": "Dn8"}}
+  ]
+}
+```
+
+- `set` works the same on `core`, an inventory item, `design`, a `usb` block and a USB slot: public properties by name. Case, spaces and `_` don't matter. Values are numbers, booleans or strings. An enum takes a member name (`"Dn8"`), the label Designer shows (`"NC-12x80"`) or a number. An unknown name or value fails with a list of the names or choices that exist.
+- `usb` goes on the Core or on an inventory item with a USB bridge (`designer_versions` → `usb_bridge_types`):
+  - `type`: `speakerphone`, `soundcard` or `none`.
+  - `count`: the number of USB slots. A speakerphone or sound card gets at least 1. `none` means 0.
+  - `mode`: the speakerphone mode, e.g. `WithEchoCancel`, by name or number.
+  - `video_bridge`: `true` adds the USB video bridge (`usb_uvc`).
+  - `set`: any other USB setting, e.g. `{"ZRMode": false}`. It is tried as `USBBridgeZRMode` on the device first, then on its USB bridge, then as `ZRMode` on the device.
+  - `slots`: one `set` per USB slot, in order, e.g. `[{"Location": "Lectern"}]`.
+- `design.set`: the design's properties, e.g. `PtpDomain`, `PtpPriority1`, `PtpPriority2`, `QosPreset`, `MtuValue`, `SoftwareDanteInterface`, `SoftwareDanteLatency`.
+
+The build reads every setting back (a value that doesn't stick is a warning) and checks the USB blocks: after `usb`, a speakerphone or sound card must offer a USB input and output block (`usb_receiver`, `usb_transmitter`), and a video bridge a `usb_uvc` block. If one is missing, the build fails with the device's blocks and settable properties. `build_design` lists everything it set, and each USB device's blocks, under `hardware`. Place the blocks like any other placeable, e.g. `{"inventory": {"class": "usb_receiver"}}` for the Core's speakerphone input or `{"inventory": {"item": "IO-USB-1", "class": "usb_uvc"}}`.
+
+Property names and enum values change between Designer versions. To find them:
+
+- `designer_versions` → `usb_bridge_types` lists the inventory types with a USB bridge.
+- `probe_components(include_hardware=true, core={"model": "Core 110f", "usb": {"type": "speakerphone"}}, inventory=[...], include_placeables=true)` lists what can be set on the Core, its USB bridge and slots, and the design, with each enum's choices. Each inventory item comes back with its settable properties, and the placeables show the blocks the settings give.
+- `read_design` reports a saved design's settings: `core.usb` (type, count, mode, video bridge), `core.settings`, `design.settings`, and each inventory item's `settings` and `usb`. Leave `settings` out of `sections` to skip them.
 
 ## components
 
@@ -28,7 +67,7 @@ Each component needs exactly one of `class` or `inventory`.
 |---|---|
 | `name` | Required and unique. Becomes the code name (what Lua, QRC and the checks use) and the block's label. Use letters, digits, `_` and `-`, starting with a letter. |
 | `class` | Component class, e.g. `gain`, `mixer`, `acoustic_echo_canceler_simd`. Use `probe_components` to see a class's properties, pins and controls before using it. |
-| `inventory` | A placeable from the Core or an inventory item: `"Flex In"`, `"USB Sound Card 1 Out"`, `"HID Conferencing"`, or `{"item": "Stage-Dante", "placeable": "..."}`. |
+| `inventory` | A placeable from the Core or an inventory item: `"Flex In"`, `"USB Sound Card 1 Out"`, `"HID Conferencing"`, or `{"item": "Stage-Dante", "placeable": "..."}`. `{"item": "IO-USB-1", "class": "usb_receiver"}` takes the item's block of that class, and `{"item": "Cam-1"}` an item's only block. Without `item`, the Core is used. |
 | `page` | Schematic page (from `pages`). Defaults to the first. Wires can't cross pages. |
 | `x`, `y` | Position on the page. Lay out left to right in signal order, roughly 200 px apart. |
 | `label` | Optional block label (defaults to `name`). |
