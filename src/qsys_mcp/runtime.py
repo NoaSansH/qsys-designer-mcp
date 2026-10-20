@@ -4,6 +4,8 @@
 QRC can see everything) and starts Designer's emulator. `calibrate` measures the engine's
 normalised position for every stored value, patches the file, then restarts on the patched
 file and checks every value came up as stored (which also catches linked controls).
+`save_snapshots` stores snapshot values, which only the engine can write, by saving them on the
+emulator and keeping the data Designer collects when emulation stops.
 """
 
 from __future__ import annotations
@@ -146,3 +148,112 @@ async def calibrate(designer: Designer, qrc: QrcClient, path: str, discard_chang
         "hint": ("A value that is right when set live but wrong after a restart usually has a linked control "
                  "(e.g. Flex preamp gain and sensitivity): store the linked control too.") if mismatched else None,
     }
+
+
+# ---- snapshot values ----------------------------------------------------------------------
+
+def _qrc_value(v):
+    return int(v) if isinstance(v, bool) else v   # booleans as 1/0, like the buttons themselves
+
+
+def _matches(expected, live: dict) -> bool:
+    """Does a control read back over QRC hold the expected spec value?"""
+    if isinstance(expected, str):
+        return live.get("String") == expected
+    got = live.get("Value")
+    if got is None:
+        return False
+    if isinstance(expected, bool):
+        return bool(got) == expected
+    return abs(float(got) - float(expected)) <= 1e-3 * max(1.0, abs(float(expected)))
+
+
+async def _put_back(qrc: QrcClient, start: dict, texts: set) -> None:
+    """Sets controls back to the values they started the run with."""
+    for (comp, ctl), r in start.items():
+        await qrc.set(comp, ctl, r.get("String", "") if (comp, ctl) in texts else r.get("Value"))
+
+
+async def _press(qrc: QrcClient, bank: dict, button: str, n: int) -> None:
+    """The bank controller's load_N or save_N, or the bank's own QRC method if the block isn't reachable."""
+    try:
+        await qrc.set(bank["controller"], f"{button}_{n}", 1)
+    except QrcError:
+        await qrc.call("Snapshot.Save" if button == "save" else "Snapshot.Load", {"Name": bank["bank"], "Bank": n})
+
+
+async def _save_on_engine(qrc: QrcClient, plan: list[dict]) -> list[dict]:
+    """Saves every planned snapshot on the running design, checks each by loading it back, and leaves the
+    controls as the run found them (Designer records a run's values when it stops). Each snapshot starts
+    from the design's own values, so a control a snapshot doesn't give keeps the design's value."""
+    touched = sorted({(c, k) for b in plan for sets in b["snapshots"].values() for c, k, _ in sets})
+    texts = {(c, k) for b in plan for sets in b["snapshots"].values() for c, k, v in sets if isinstance(v, str)}
+    start = {ck: (await qrc.get(ck[0], [ck[1]]))["Controls"][0] for ck in touched}
+    report = []
+    for b in plan:
+        try:
+            ramp = float((await qrc.get(b["controller"], ["ramp_time"]))["Controls"][0].get("Value") or 0)
+        except QrcError:
+            ramp = 0.0
+        for n, sets in sorted(b["snapshots"].items()):
+            await _put_back(qrc, start, texts)
+            for comp, ctl, v in sets:
+                await qrc.set(comp, ctl, _qrc_value(v))
+            await asyncio.sleep(0.5)
+            await _press(qrc, b, "save", n)
+            await asyncio.sleep(0.5)
+        mismatched = []
+        for n, sets in sorted(b["snapshots"].items()):
+            await _put_back(qrc, start, texts)   # so a snapshot that didn't save can't pass
+            await asyncio.sleep(0.3)
+            await _press(qrc, b, "load", n)
+            await asyncio.sleep(min(ramp, 10) + 0.8)
+            for comp, ctl, v in sets:
+                live = (await qrc.get(comp, [ctl]))["Controls"][0]
+                if not _matches(v, live):
+                    mismatched.append(f"snapshot {n}: {comp}.{ctl} should be {v!r}, loaded as "
+                                      f"{live.get('String') if isinstance(v, str) else live.get('Value')!r}")
+        report.append({"bank": b["bank"], "saved": sorted(b["snapshots"]), "mismatched_on_load": mismatched})
+    await _put_back(qrc, start, texts)
+    await asyncio.sleep(0.5)
+    return report
+
+
+async def save_snapshots(designer: Designer, qrc: QrcClient, path: str, spec_or_values,
+                         discard_changes: bool = False) -> dict:
+    path = os.path.abspath(path)
+    inst = headless.pick(for_file=path)
+    design = designs.read(path)
+    plan, problems = designs.snapshot_plan(design, designs.snapshot_values(spec_or_values))
+    if problems:
+        raise designs.SpecError("snapshot values don't match the design:\n- " + "\n- ".join(problems))
+    if not plan:
+        return {"path": path, "detail": "no snapshot values to save"}
+    access = {c["name"]: c["script_access"] for c in design["components"]}
+    access.update({b["controller"]["name"]: b["controller"]["script_access"]
+                   for b in design["snapshots"].get("banks", []) if b.get("controller")})
+
+    # 1. save every snapshot on a test copy (every block visible to QRC), then keep what Designer collects
+    run = await emulate(designer, qrc, path, test_copy=True, discard_changes=discard_changes)
+    if not run.get("emulating"):
+        return {"path": path, "stopped_at": "emulate", **run}
+    work = run["opened"]
+    banks = await _save_on_engine(qrc, plan)
+    stopped = await asyncio.to_thread(designer.stop)
+    if stopped["dialogs"]:
+        return {"path": path, "stopped_at": "stop", "banks": banks, **stopped,
+                "detail": "Designer is showing a dialog after stopping; the original file is unchanged."}
+    saved = await asyncio.to_thread(designer.save, work, 10)
+    if not saved["saved"]:
+        return {"path": path, "stopped_at": "save", "banks": banks, "work_copy": work, **saved,
+                "detail": "The test copy could not be saved in Designer; the original file is unchanged."}
+    await asyncio.to_thread(designer.close_designs, False)
+
+    # 2. the saved copy, with each block's own Script Access back, replaces the original
+    headless.run({"command": "copy", "path": work, "out_path": path, "overwrite": True, "script_access_map": access}, inst)
+    after = designs.read(path)
+    stored = {b["name"]: b.get("stored", []) for b in (after.get("snapshots") or {}).get("banks", [])}
+    missing = [f"{b['bank']} {n}" for b in plan for n in b["snapshots"] if n not in stored.get(b["bank"], [])]
+    return {"path": path, "designer": inst.version, "banks": banks, "stored": stored, "missing_in_file": missing,
+            "hint": ("Snapshots saved on the engine but missing from the file: Designer didn't collect their data "
+                     "when emulation stopped.") if missing else None}

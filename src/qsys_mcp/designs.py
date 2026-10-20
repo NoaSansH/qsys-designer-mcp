@@ -29,6 +29,8 @@ OLD_HELPER = ("This Designer uses the prebuilt .NET helper, which is older than 
 PIN_DIRS = ("in", "out", "both")
 # a Text Controller control's "pins" setting, as a pin direction
 PIN_STYLES = {"None": "none", "Input": "in", "Output": "out", "Both": "both"}
+# what the helper reports for a bank whose snapshot values it could not store (the engine writes them)
+SNAPSHOT_VALUES_PENDING = "snapshot values need save_snapshots"
 
 
 class SpecError(ValueError):
@@ -218,6 +220,7 @@ def validate(spec: dict, base_dir: str | Path | None = None) -> tuple[dict, list
                     problems.append(f"wires[{i}]: {end!r}: the Text Controller control {m['pin']} has no pins (set its \"pins\")")
                 elif have in ("in", "out") and have != d:
                     problems.append(f"wires[{i}]: {end!r}: {m['pin']} only has an {'input' if have == 'in' else 'output'} pin")
+    names |= _validate_snapshots(spec, names, pages, problems)   # UCIs can use a bank controller's buttons
     for u in spec.get("ucis", []):
         for p in u.get("pages", []):
             for j, e in enumerate(p.get("elements", [])):
@@ -303,6 +306,14 @@ def build(spec: dict, path: str, overwrite: bool = False, designer_version: str 
     if unconfirmed:
         res["next_step"] = ("Some stored values use an assumed taper. Run calibrate_values on this file to measure "
                             "them on the engine (needs Designer's emulator), or check them at runtime over QRC.")
+    if prepared.get("snapshots") and "snapshots" not in res:
+        raise headless.HelperError(f"{path} was written without its snapshot banks: this Designer's helper predates them. "
+                                   "Rebuild the .NET 8 helper (README, Development), then build again with overwrite=True.")
+    pending = [b["name"] for b in (res.get("snapshots") or {}).get("banks", []) if b.get("values") == SNAPSHOT_VALUES_PENDING]
+    if pending:
+        hint = (f"Snapshot values of {', '.join(pending)} aren't stored yet (the engine writes them): run save_snapshots "
+                "on this file with the same spec to store them through Designer's emulator.")
+        res["next_step"] = f"{res['next_step']} {hint}" if "next_step" in res else hint
     res.pop("values", None) if len(res.get("values", [])) > 200 else None
     return res
 
@@ -333,7 +344,7 @@ def control_pins(pins: list[dict]) -> list[dict]:
 
 def summarise(design: dict, components: list[str] | None = None, include: set[str] | None = None) -> dict:
     """Trim a read-back for display: optional component filter and sections."""
-    include = include or {"properties", "values", "pins", "wires", "ucis", "settings"}
+    include = include or {"properties", "values", "pins", "wires", "ucis", "settings", "snapshots"}
     d = {k: design[k] for k in ("path", "bytes", "designer", "saved_by", "core", "design", "usb_slots", "inventory", "pages")
          if k in design}
     if "settings" not in include:   # hardware settings: the Core's, the design's and each inventory item's
@@ -347,6 +358,12 @@ def summarise(design: dict, components: list[str] | None = None, include: set[st
         comps = [c for c in comps if c["name"] in components]
     d["component_count"] = len(design["components"])
     d["components"] = [{k: v for k, v in c.items() if k not in {"properties", "values", "pins"} or k in include} for c in comps]
+    snaps = design.get("snapshots")
+    if "snapshots" in include and snaps is not None:
+        if components and "banks" in snaps:
+            snaps = {**snaps, "banks": [b for b in snaps["banks"] if b.get("name") in components
+                                        or any(m.get("component") in components for m in b.get("members", []))]}
+        d["snapshots"] = snaps
     if "wires" in include:
         d["wires"] = design["wires"] if not components else [w for w in design["wires"]
                                                              if any(w[0].startswith(n + ".") or w[1].startswith(n + ".") for n in components)]
@@ -491,3 +508,147 @@ def check(design: dict, paths: list[dict] | None = None, allow_unconnected: list
             detail["missing_via"] = via_missing
         results.append({"check": label, "pass": ok, "detail": detail})
     return {"passed": sum(r["pass"] for r in results), "failed": sum(not r["pass"] for r in results), "results": results}
+
+
+# ---- snapshot values ----------------------------------------------------------------------
+
+def _snapshot_members(members, where: str, problems: list[str]) -> dict[str, set[str] | None]:
+    """A bank's members as {component: its controls, or None for every control of the block}."""
+    out: dict[str, set[str] | None] = {}
+    if not isinstance(members, list):
+        problems.append(f"{where}: members must be a list")
+        return out
+    for m in members:
+        if isinstance(m, str):
+            comp, _, ctl = m.partition(".")
+            if not comp or not ctl:
+                problems.append(f"{where}: member {m!r} should look like COMPONENT.control")
+                continue
+            controls, whole = {ctl}, False
+        elif isinstance(m, dict) and isinstance(m.get("component"), str):
+            comp, whole, listed = m["component"], m.get("all") is True, m.get("controls") or []
+            if whole == bool(listed) or not isinstance(listed, list) or not all(isinstance(c, str) and c for c in listed):
+                problems.append(f"{where}: member {comp}: give a list of control names or all: true")
+                continue
+            controls = set(listed)
+        else:
+            problems.append(f"{where}: member {m!r} should be COMPONENT.control or {{component, controls | all}}")
+            continue
+        if comp in out and (out[comp] is None) != whole:
+            problems.append(f"{where}: {comp} is listed both whole (all: true) and by control")
+            continue
+        out[comp] = None if whole else (out.get(comp) or set()) | controls
+    return out
+
+
+def _validate_snapshots(spec: dict, names: set[str], pages: list[str], problems: list[str]) -> set[str]:
+    """Checks spec.snapshots; returns the bank names (each is also its controller block's code name)."""
+    banks: set[str] = set()
+    for i, b in enumerate(spec.get("snapshots") or []):
+        where = f"snapshots[{i}]"
+        if not isinstance(b, dict):
+            problems.append(f"{where}: expected an object with name, count and members")
+            continue
+        name = b.get("name")
+        if not isinstance(name, str) or not NAME_RE.match(name):
+            problems.append(f"{where}: name {name!r} must start with a letter and use letters, digits, _ or -")
+        elif name in names or name in banks:
+            problems.append(f"{where}: name {name} is already used (a bank's name is its controller's code name)")
+        else:
+            where = f"snapshot bank {name}"
+        if isinstance(name, str):
+            banks.add(name)
+        count = b.get("count")
+        if isinstance(count, bool) or not isinstance(count, int) or count < 1:
+            problems.append(f"{where}: count must be a whole number of snapshots, 1 or more")
+            count = None
+        members = _snapshot_members(b.get("members", []), where, problems)
+        problems.extend(f"{where}: no component {c}" for c in members if c not in names)
+        ctl = b.get("controller") or {}
+        if not isinstance(ctl, dict):
+            problems.append(f"{where}: controller must be an object (page, x, y, label, script_access)")
+            ctl = {}
+        if ctl.get("page", pages[0]) not in pages:
+            problems.append(f"{where}: controller page {ctl.get('page')!r} is not in spec.pages")
+        if ctl.get("script_access", "None") not in ACCESS:
+            problems.append(f"{where}: controller script_access must be one of {sorted(ACCESS)}")
+        values = b.get("values") or {}
+        if not isinstance(values, dict):
+            problems.append(f"{where}: values must map snapshot numbers to {{COMPONENT.control: value}}")
+            continue
+        for n, snap in values.items():
+            if not str(n).isdigit() or int(n) < 1 or (count and int(n) > count):
+                problems.append(f"{where}: values key {n!r} must be a snapshot number from 1 to {count or 'count'}")
+                continue
+            if not isinstance(snap, dict):
+                problems.append(f"{where}: snapshot {n} must map COMPONENT.control to a value")
+                continue
+            for key, v in snap.items():
+                comp, _, control = key.partition(".")
+                if comp not in members or not control or (members[comp] is not None and control not in members[comp]):
+                    problems.append(f"{where}: snapshot {n}: {key} is not a member of the bank")
+                elif not isinstance(v, (bool, int, float, str)):
+                    problems.append(f"{where}: snapshot {n}: {key} must be a number, true/false or a string")
+    return banks
+
+
+def snapshot_values(spec_or_values) -> dict[str, dict[int, dict]]:
+    """Snapshot values as {bank: {n: {"COMP.control": value}}}, from a spec, its "snapshots" list, or
+    that mapping itself."""
+    src = spec_or_values
+    if isinstance(src, dict) and "snapshots" in src:
+        src = src["snapshots"]
+    elif isinstance(src, dict) and src.keys() & {"components", "wires", "ucis", "pages", "core", "inventory"}:
+        raise SpecError("the spec has no snapshots")
+    if isinstance(src, list):
+        src = {b.get("name"): b.get("values") or {} for b in src if isinstance(b, dict)}
+    if not isinstance(src, dict):
+        raise SpecError("snapshot values must be a spec, its snapshots list, or {BANK: {n: {COMP.control: value}}}")
+    out: dict[str, dict[int, dict]] = {}
+    for bank, snaps in src.items():
+        if not isinstance(snaps, dict):
+            raise SpecError(f"snapshot bank {bank}: values must map snapshot numbers to {{COMP.control: value}}")
+        for n, vals in snaps.items():
+            if not str(n).isdigit() or not isinstance(vals, dict):
+                raise SpecError(f"snapshot bank {bank}: {n!r} must be a snapshot number mapped to {{COMP.control: value}}")
+            out.setdefault(bank, {})[int(n)] = dict(vals)   # {} is a snapshot of the design's own values
+    return out
+
+
+def snapshot_plan(design: dict, values: dict[str, dict[int, dict]]) -> tuple[list[dict], list[str]]:
+    """Matches snapshot values to a read-back design's banks. Returns
+    ([{bank, controller, count, snapshots: {n: [(component, control, value)]}}], problems)."""
+    if "snapshots" not in design:
+        return [], ["this Designer's helper doesn't read snapshot banks yet: rebuild the .NET 8 helper (README, Development)"]
+    snaps = design.get("snapshots") or {}
+    banks = {b["name"]: b for b in snaps.get("banks", [])}
+    plan, problems = [], []
+    if snaps.get("error"):
+        problems.append(f"could not read the design's snapshot banks: {snaps['error']}")
+    for name, by_number in values.items():
+        b = banks.get(name)
+        if b is None:
+            problems.append(f"no snapshot bank {name} in the design (banks: {sorted(banks) or 'none'})")
+            continue
+        controller = (b.get("controller") or {}).get("name")
+        if not controller:
+            problems.append(f"snapshot bank {name} has no controller block")
+            continue
+        whole = {m["component"] for m in b.get("members", []) if m.get("all")}
+        listed = {(m["component"], c) for m in b.get("members", []) for c in m.get("controls", [])}
+        entry = {"bank": name, "controller": controller, "count": b.get("count"), "snapshots": {}}
+        for n, vals in sorted(by_number.items()):
+            if not 1 <= n <= (b.get("count") or 0):
+                problems.append(f"snapshot bank {name}: no snapshot {n} (it has {b.get('count')})")
+                continue
+            sets = []
+            for key, v in vals.items():
+                comp, _, control = key.partition(".")
+                if not control or (comp not in whole and (comp, control) not in listed):
+                    problems.append(f"snapshot bank {name}: snapshot {n}: {key} is not a member of the bank")
+                else:
+                    sets.append((comp, control, v))
+            entry["snapshots"][n] = sets
+        if entry["snapshots"]:
+            plan.append(entry)
+    return plan, problems

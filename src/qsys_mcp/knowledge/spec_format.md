@@ -11,6 +11,7 @@
   "pages": ["Audio", "Control"],
   "components": [ ... ],
   "wires": [ ["A.out.1", "B.in.1"], ... ],
+  "snapshots": [ ... ],
   "ucis": [ ... ]
 }
 ```
@@ -130,6 +131,43 @@ Control wires are written the same way. A control pin can also be named by its c
 - One output can feed many inputs.
 - Each input takes one wire.
 - Both ends must be on the same page.
+
+## snapshots
+
+Each entry is a snapshot bank and its Snapshot Controller block, which has `load_1`..`load_N`, `save_1`..`save_N` and `ramp_time`.
+
+```json
+"snapshots": [{
+  "name": "Room_Modes",
+  "count": 4,
+  "members": ["MIXER.input_1_mute",
+              {"component": "MIC_GAIN", "controls": ["gain", "mute"]},
+              {"component": "PROGRAM_EQ", "all": true}],
+  "controller": {"page": "Control", "x": 600, "y": 100, "script_access": "Script"},
+  "values": {
+    "1": {"MIXER.input_1_mute": false, "MIC_GAIN.gain": -6},
+    "2": {"MIXER.input_1_mute": true, "MIC_GAIN.mute": true}
+  }
+}]
+```
+
+| key | meaning |
+|---|---|
+| `name` | Required and unique. The bank's name and its controller's code name, so it can't also be a component's name. Same rules as component names. |
+| `count` | Required. How many snapshots the bank holds (1 or more). |
+| `members` | What the bank stores: `"COMPONENT.control"`, `{"component": ..., "controls": [...]}` for some controls, or `{"component": ..., "all": true}` for every control of the block. |
+| `controller` | Optional. Where the controller block goes: `page`, `x`, `y`, `label` and `script_access`, as for components (default `None`). |
+| `values` | Optional stored snapshots: snapshot number → `{"COMPONENT.control": value}`. Each snapshot starts from the design's own values, so a control it doesn't list keeps the design's value, and `{}` stores the design's values as they are. Every control must be a member of the bank. |
+
+A UCI can use the controller's buttons: `{"type": "control", "component": "Room_Modes", "control": "load_1", ...}`.
+
+### Snapshot values
+
+The engine writes snapshot data. It's kept in the design file, but not as design objects, so `build_design` can't always store it. A bank whose values it couldn't store reports `"values": "snapshot values need save_snapshots"`, and `next_step` says so.
+
+Then run `save_snapshots(path, spec)`. It emulates a test copy, sets each snapshot's controls over QRC, presses the controller's `save_N`, checks every snapshot with `load_N` and puts the controls back. It then saves the copy in Designer and writes it over the file, with each block's own Script Access. Any control a script changes during that run is saved too, as when you save after emulating in Designer.
+
+`read_design` lists each bank (members, controller block) and which snapshots hold data (`stored`).
 
 ## ucis
 

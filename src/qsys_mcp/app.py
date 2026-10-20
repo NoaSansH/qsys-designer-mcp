@@ -273,6 +273,26 @@ class Designer:
         time.sleep(1.5)
         return {"mode": self._mode(self.window()), "dialogs": self.dialogs()}
 
+    def save(self, path: str | None = None, wait_for_changes: float = 0, timeout: float = 30) -> dict:
+        """File > Save, then wait until it's done: the title's unsaved mark (*) has cleared and, given the
+        open file's path, the file has been written. wait_for_changes first waits up to that long for the
+        mark to appear (Designer records a run's values just after it stops)."""
+        deadline = time.time() + wait_for_changes
+        while time.time() < deadline and not _title_unsaved(self.window().window_text()):
+            time.sleep(0.5)
+        written_before = os.path.getmtime(path) if path and os.path.exists(path) else None
+        self.menu("File->Save")
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            time.sleep(0.5)
+            written = path is None or (os.path.exists(path) and os.path.getmtime(path) != written_before)
+            if written and not _title_unsaved(self.window().window_text()):
+                return {"saved": True, "title": self.window().window_text()}
+            dialogs = self.dialogs()
+            if dialogs:
+                return {"saved": False, "dialogs": dialogs}
+        return {"saved": False, "title": self.window().window_text(), "dialogs": self.dialogs()}
+
     # ---- screenshot ------------------------------------------------------------------------
     def screenshot(self) -> bytes:
         """PNG of the Designer window (brought to the front first)."""

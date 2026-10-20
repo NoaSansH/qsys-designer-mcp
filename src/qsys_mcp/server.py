@@ -27,7 +27,8 @@ mcp = MCPServer(
         "use probe_components to learn the classes you need (properties, pins, controls), write a spec, "
         "build_design to a NEW file, read_design + check_design to verify what was saved, then "
         "emulate_design and the qrc_* tools to test control logic. calibrate_values measures stored "
-        "values on the engine. Never overwrite an existing design unless the user asked for that. "
+        "values on the engine; save_snapshots stores snapshot values through the emulator. "
+        "Never overwrite an existing design unless the user asked for that. "
         "Emulation has no audio: report signal paths as statically verified, not as heard. "
         "Read qsys://lua-api before writing Lua and qsys://design-guide before reviewing a design."
     ),
@@ -149,9 +150,10 @@ def read_design(path: str, components: list[str] | None = None, sections: list[s
     """Read a saved .qsys back: core (model, name, USB type/count/mode/video bridge, settings), the design's
     own settings (PTP, QoS, MTU...), USB slots, inventory (each item's settings and USB), pages, every
     component (class, name, Script Access, properties, stored values with positions, pins with their domain,
-    control_pins), wires and UCIs. Uses the Designer version that saved the file. Filter with
-    components=[names] and sections (any of properties, values, pins, wires, ucis, settings) for big
-    designs. Works on any design, not only ones built here."""
+    control_pins), wires, UCIs and snapshot banks (members, controller block, which snapshots hold data).
+    Uses the Designer version that saved the file. Filter with components=[names] and sections (any of
+    properties, values, pins, wires, ucis, settings, snapshots) for big designs.
+    Works on any design, not only ones built here."""
     d = designs.read(path)
     return designs.summarise(d, components, set(sections) if sections else None)
 
@@ -215,6 +217,19 @@ async def calibrate_values(path: str, discard_changes: bool = False) -> dict:
     confirms each value comes up as stored, reporting any linked controls. Measured positions are cached
     for future builds. Changes the file's stored positions only; closes any running Designer first."""
     return await runtime.calibrate(designer, qrc, path, discard_changes)
+
+
+@tool(WRITES_FILE)
+async def save_snapshots(path: str, spec_or_values: dict | list, discard_changes: bool = False) -> dict:
+    """Store snapshot values in a design. Only the engine writes snapshot data, so this is how a spec's
+    snapshots[].values get into the file when build_design reports "snapshot values need save_snapshots".
+    spec_or_values is the spec, its snapshots list, or {"BANK": {"1": {"COMP.control": value}}}.
+    Emulates a test copy, sets each snapshot's controls over QRC (starting from the design's own values),
+    presses the bank controller's save_N, checks each snapshot with load_N, puts the controls back, then
+    saves the copy in Designer and writes it over `path` with each block's own Script Access. Any control a
+    script changes during the run is saved too. Closes any running Designer first (see open_design for
+    discard_changes)."""
+    return await runtime.save_snapshots(designer, qrc, path, spec_or_values, discard_changes)
 
 
 @tool(READ_ONLY)
