@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 import pytest
@@ -36,6 +37,11 @@ def test_positions_cache_roundtrip(monkeypatch, tmp_path):
     headless.save_positions(inst, [e])
     headless.save_positions(inst, [dict(e, position=0.78333)])   # same key: replaced, not duplicated
     assert headless.load_positions(inst) == [dict(e, position=0.78333)]
+
+
+def test_net8_project_compiles_the_same_sources():
+    proj = (Path(__file__).parent.parent / "helper-net8" / "QsysHelper.csproj").read_text(encoding="utf-8")
+    assert sorted(re.findall(r'<Compile Include="\.\./src/qsys_mcp/helper/([^"]+)"', proj)) == sorted(headless.HELPER_SOURCES)
 
 
 class FakeWindow:

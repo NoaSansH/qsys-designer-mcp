@@ -118,10 +118,13 @@ static class Q
             Convert.ToString(TryF(p, "Value") ?? TryGet(p, "Value")))).ToList();
     }
 
+    // A direction's pins: the block's own in drawing order, then the ones the user added (control pins) in
+    // the order they were added, so adding control pins never renumbers the block's own pins.
     public static List<object> Pins(object comp, string direction)
     {
-        return L(Get(comp, "Pins")).Where(p => F(p, "Direction").ToString() == direction)
-            .OrderBy(p => Convert.ToDouble(Get(p, "GraphicIndex"))).ToList();
+        var pins = L(Get(comp, "Pins")).Where(p => F(p, "Direction").ToString() == direction).ToList();
+        return pins.Where(p => !QControlPins.IsUserPin(p)).OrderBy(p => Convert.ToDouble(Get(p, "GraphicIndex")))
+            .Concat(pins.Where(QControlPins.IsUserPin)).ToList();
     }
 
     // n-th (1-based) pin of a direction ("Input"/"Output"), in drawing order.

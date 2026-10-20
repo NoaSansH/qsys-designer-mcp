@@ -75,6 +75,7 @@ Each component needs exactly one of `class` or `inventory`.
 | `script_access` | `None` (default), `Script` (Lua only), `External` (QRC/third party and UCIs over the network) or `All`. Keep it minimal. `emulate_design` makes a test copy with everything set to `All`, so access doesn't need opening up for testing. |
 | `values` | Stored control values: `{"gain": -6, "mute": true, "frequency": 100}`. Numbers, booleans or strings. Use `{"value": v, "position": p}` to give the 0..1 position yourself. |
 | `text_controller` | For `device_controller_script` only: `{"controls": [...], "lua": "..."}`, or `"lua_file"` relative to `spec_dir`. |
+| `control_pins` | Controls that show a control pin, so control wires can reach them: `["connected", {"control": "mute", "dir": "both"}]`. See Control pins below. |
 
 ### Stored values and positions
 
@@ -105,9 +106,26 @@ Some controls are linked. Flex inputs, for example, have `preamp_gain` and `sens
 
 In Lua, a control with count 1 is `Controls.Name`. Other blocks are reached with `Component.New("CODE_NAME")`, which needs that block's `script_access` to be `Script` or `All`. The Lua is syntax-checked before building.
 
+### Control pins
+
+A control of any block can show a control pin (Properties > Control Pins in Designer), so that a control wire can join it to another control. List them in `control_pins` by control code name:
+
+```json
+{"name": "USB_IN", "inventory": "USB Sound Card 1 In", "control_pins": ["connected"]}
+{"name": "PROGRAM_GAIN", "class": "gain", "control_pins": [{"control": "mute", "dir": "both"}, {"control": "gain", "dir": "in"}]}
+```
+
+- `dir` is `in`, `out` or `both`. Without it, the control gets what Designer offers: an output pin for read-only controls and indicators, both pins for the rest.
+- `probe_components` shows the directions each control offers under `pin`. A class there can take `control_pins` too, e.g. `{"class": "gain", "control_pins": ["mute"]}`: the pins it would get come back without anything being written.
+- A Text Controller's own controls take `pins` instead (see above).
+- `build_design` lists each control pin it added under `control_pins`, with `route` saying how Designer added it.
+- Control pins are numbered after the block's own pins, in the order they were added (in a build, the order of `control_pins`). Name them in wires rather than numbering them.
+
 ## wires
 
 Write each wire as `["FROM.out.N", "TO.in.M"]`. A pin can be given by its 1-based number or by its name, for example `"AEC_01.in.Reference"` or `"CONF_AUTOMIXER.out.Mix Output"`. `probe_components` lists each pin's number and name.
+
+Control wires are written the same way. A control pin can also be named by its control code name: `["USB_IN.out.connected", "ROOM_LOGIC.in.PcConnected"]`, `["ROOM_LOGIC.out.MuteAll", "PROGRAM_GAIN.in.mute"]`. A wire joins two control pins or two signal pins, never one of each.
 
 - One output can feed many inputs.
 - Each input takes one wire.
@@ -136,7 +154,11 @@ Write each wire as `["FROM.out.N", "TO.in.M"]`. A pin can be given by its 1-base
 
 Two tools check a built design:
 
-- `read_design` reads a saved file back.
-- `check_design` runs static checks on it: unique names, unconnected pins, stored positions, and signal paths. Signal paths are written as `{"from": "FLEX_IN.out.3", "to": "USB_TX_CONF", "expect": false}`, with optional `via: [...]`. An AEC's Reference input counts as subtracted, not passed through.
+- `read_design` reads a saved file back. Each pin has its `domain` (`audio`, `control`, `video`...). A control pin added for a control has `user_created` and the control's code name in `control`, and a block with such pins lists them under `control_pins`, in the spec's form. `control_wire_count` counts the wires between control pins.
+- `check_design` runs static checks on it: unique names, unconnected signal pins, unused control pins, stored positions, and signal paths. Signal paths are written as `{"from": "FLEX_IN.out.3", "to": "USB_TX_CONF", "expect": false}`, with optional `via: [...]`. An AEC's Reference input counts as subtracted, not passed through.
+
+Signal and control stay apart in the checks. A block passes its signal inputs to its signal outputs and its control inputs to its control outputs. A path rule that starts at a control pin, such as `{"from": "USB_IN.out.connected", "to": "PROGRAM_GAIN", "via": ["ROOM_LOGIC"]}`, follows control wires, and a bare block name in `to` or `via` then means that block's control pins.
+
+Control pins don't count as unconnected pins. Instead, a control in a block's `control_pins` with none of its pins wired fails "no unused control pins"; wiring one side of a `both` is enough. `allow_unconnected` covers both checks. A block's own control pins (logic gate inputs and the like) aren't checked.
 
 For control logic, use `emulate_design` and then the `qrc_*` tools. Emulation has no audio: it can test control state, but not whether sound actually gets through.

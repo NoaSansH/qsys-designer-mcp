@@ -136,6 +136,7 @@ static class QsysHelper
             if (min != null) o["min"] = Convert.ToDouble(min);
             if (max != null) o["max"] = Convert.ToDouble(max);
             if ((bool)(Q.TryF(d, "IsReadonly") ?? false)) o["readonly"] = true;
+            QControlPins.DescribeControl(o, d);
             arr.Add(o);
         }
         return arr;
@@ -153,7 +154,11 @@ static class QsysHelper
         {
             int i = 0;
             foreach (var p in Q.Pins(comp, dir))
-                arr.Add(new JObject { { "dir", dir == "Input" ? "in" : "out" }, { "index", ++i }, { "name", Q.PinName(p) } });
+            {
+                var o = new JObject { { "dir", dir == "Input" ? "in" : "out" }, { "index", ++i }, { "name", Q.PinName(p) } };
+                QControlPins.Describe(o, p);
+                arr.Add(o);
+            }
         }
         return arr;
     }
@@ -239,6 +244,7 @@ static class QsysHelper
                 Q.Refresh(c);
                 o["label"] = (string)Q.Get(c, "Label");
                 o["properties"] = Props(c);
+                QControlPins.Probe(o, c, spec);
                 o["pins"] = PinInfo(c);
                 o["controls"] = ControlInfo(c);
             }
@@ -386,6 +392,12 @@ static class QsysHelper
             foreach (var kv in values) valuesOut.Add(StoreValue(c, kv.Key, kv.Value, cache));
         }
 
+        // control pins, before the wires that join them
+        var controlPins = new JArray();
+        foreach (JObject cs in (spec["components"] as JArray ?? new JArray()))
+            if (cs["control_pins"] != null)
+                foreach (var r in QControlPins.Add(comps[(string)cs["name"]], cs["control_pins"])) controlPins.Add(r);
+
         // wires
         int wireCount = 0;
         foreach (var w in (spec["wires"] as JArray ?? new JArray()))
@@ -416,12 +428,13 @@ static class QsysHelper
         var res = new JObject {
             { "path", path }, { "bytes", new FileInfo(path).Length }, { "designer_version", DesignerVersion() },
             { "core", Convert.ToString(Q.Get(core, "CoreModelPretty")) }, { "components", comps.Count }, { "wires", wireCount },
-            { "uci_elements", uciElements }, { "values", valuesOut }, { "warnings", warnings } };
+            { "uci_elements", uciElements }, { "values", valuesOut }, { "control_pins", controlPins }, { "warnings", warnings } };
         QHardware.Report(res, warnings);   // "hardware": what was set
         return res;
     }
 
-    // "NAME.out.3", "NAME.in.2", "NAME.in.Reference" (pin name, case-insensitive)
+    // "NAME.out.3", "NAME.in.2", "NAME.in.Reference" (pin name, case-insensitive), "NAME.out.connected"
+    // (a control pin by its control code name)
     static object ResolvePin(Dictionary<string, object> comps, string endpoint, string direction)
     {
         var dirTag = direction == "Input" ? ".in." : ".out.";
@@ -438,9 +451,10 @@ static class QsysHelper
             if (n < 1 || n > pins.Count) throw new Exception(name + " has " + pins.Count + " " + direction.ToLower() + " pins, not " + n);
             return pins[n - 1];
         }
-        var byName = pins.Where(p => string.Equals(Q.PinName(p), pinRef, StringComparison.OrdinalIgnoreCase)).ToList();
+        var byName = QControlPins.Match(pins, pinRef);
         if (byName.Count != 1)
-            throw new Exception(name + " has no single " + direction.ToLower() + " pin named '" + pinRef + "'; pins: " + string.Join(", ", pins.Select(Q.PinName)));
+            throw new Exception(name + " has no single " + direction.ToLower() + " pin named '" + pinRef + "'; pins: " +
+                string.Join(", ", pins.Select(QControlPins.Label)) + QControlPins.Hint(c, pinRef, direction));
         return byName[0];
     }
 
