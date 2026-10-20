@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.0 (2026-10-20)
+
+- Spec: USB bridge settings of the Core and of I/O-USB Bridges (`usb_bridge`: Speakerphone, EC mode, video bridge, bridge name), inventory items built from a model (cameras: `model`), and `design_properties` (PTP, QoS, Software Dante).
+- Spec: control pins on any block (`control_pins`), wired by pin name or control id.
+- Spec: installed schematic plugins (`plugin`, or `plugin_file` for a `.qplug`). The plugin's code is saved in the design.
+- Spec: signal names on wires (a wire's third element), and connections by signal name with no wire (`signals`).
+- Spec: notes and group boxes on the schematic (`graphics`).
+- Spec: snapshot banks with their Snapshot Controllers (`snapshot_banks`). New tool `record_snapshots` saves each snapshot's contents in emulation and copies them into the design.
+- `read_design` returns signal names, signal-name connections, notes, snapshot banks (and which snapshots hold data) and block sizes. Snapshot Controllers are read like any other block.
+- `probe_components` explains list properties (`property_choices`).
+- The prebuilt .NET 8 helper (Designer 10) isn't rebuilt with these additions yet: `dotnet publish helper-net8 -c Release -o src/qsys_mcp/helper/net8`. Tested with Designer 9.13.2.
+
 ## 0.1.0 (2026-10-13)
 
 First public release.

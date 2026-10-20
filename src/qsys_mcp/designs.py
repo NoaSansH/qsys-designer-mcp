@@ -42,8 +42,11 @@ def validate(spec: dict, base_dir: str | Path | None = None) -> tuple[dict, list
         elif name in names:
             problems.append(f"{where}: duplicate name {name}")
         names.add(name)
-        if bool(c.get("class")) == bool(c.get("inventory")):
-            problems.append(f"{name}: give exactly one of 'class' or 'inventory'")
+        kinds = [k for k in ("class", "inventory", "plugin", "plugin_file") if c.get(k)]
+        if len(kinds) != 1 and set(kinds) != {"plugin", "plugin_file"}:
+            problems.append(f"{name}: give exactly one of 'class', 'inventory' or 'plugin'")
+        if not isinstance(c.get("control_pins", []), list):
+            problems.append(f"{name}: control_pins must be a list of control ids")
         if c.get("page", pages[0]) not in pages:
             problems.append(f"{name}: page {c.get('page')!r} is not in spec.pages")
         if c.get("script_access", "None") not in ACCESS:
@@ -67,9 +70,9 @@ def validate(spec: dict, base_dir: str | Path | None = None) -> tuple[dict, list
                 if not chk["ok"]:
                     problems.append(f"{name}: Lua syntax error: {chk.get('error')}")
     for i, w in enumerate(spec.get("wires", [])):
-        ends = w if isinstance(w, list) else [w.get("from"), w.get("to")]
+        ends = w[:2] if isinstance(w, list) and len(w) == 3 else w if isinstance(w, list) else [w.get("from"), w.get("to")]
         if len(ends) != 2:
-            problems.append(f"wires[{i}]: expected [from, to]")
+            problems.append(f"wires[{i}]: expected [from, to] or [from, to, signal name]")
             continue
         for end, d in zip(ends, ("out", "in")):
             m = ENDPOINT_RE.match(end or "")
@@ -77,6 +80,34 @@ def validate(spec: dict, base_dir: str | Path | None = None) -> tuple[dict, list
                 problems.append(f"wires[{i}]: {end!r} should look like NAME.{d}.N or NAME.{d}.PinName")
             elif m["name"] not in names:
                 problems.append(f"wires[{i}]: no component {m['name']}")
+    for i, s in enumerate(spec.get("signals", [])):
+        ends = s[:2] if isinstance(s, list) else [s.get("from"), s.get("to")]
+        name = (s[2] if len(s) > 2 else None) if isinstance(s, list) else s.get("signal")
+        if not name:
+            problems.append(f"signals[{i}]: needs a signal name, e.g. [from, to, name]")
+        for end, d in zip(ends, ("out", "in")):
+            m = ENDPOINT_RE.match(end or "")
+            if not m or m["dir"] != d:
+                problems.append(f"signals[{i}]: {end!r} should look like NAME.{d}.N or NAME.{d}.PinName")
+            elif m["name"] not in names:
+                problems.append(f"signals[{i}]: no component {m['name']}")
+    for g in spec.get("graphics", []):
+        if g.get("type", "text") not in ("text", "group"):
+            problems.append(f"graphics: type must be text or group, not {g.get('type')!r}")
+        if g.get("page", pages[0]) not in pages:
+            problems.append(f"graphics: page {g.get('page')!r} is not in spec.pages")
+    for b in spec.get("snapshot_banks", []):
+        if not b.get("name"):
+            problems.append("snapshot_banks: every bank needs a name")
+        for e in b.get("controls", []):
+            if e.get("component") not in names:
+                problems.append(f"snapshot bank {b.get('name')}: no component {e.get('component')}")
+        ctl = b.get("controller")
+        if ctl:
+            code = ctl.get("name", b.get("name"))
+            if not code or not NAME_RE.match(code) or code in names:
+                problems.append(f"snapshot bank {b.get('name')}: controller name {code!r} must be a new, valid name")
+            names.add(code)
     for u in spec.get("ucis", []):
         for p in u.get("pages", []):
             for j, e in enumerate(p.get("elements", [])):
@@ -124,7 +155,7 @@ def read(path: str, designer_version: str | None = None) -> dict:
 
 def summarise(design: dict, components: list[str] | None = None, include: set[str] | None = None) -> dict:
     """Trim a read-back for display: optional component filter and sections."""
-    include = include or {"properties", "values", "pins", "wires", "ucis"}
+    include = include or {"properties", "values", "pins", "wires", "ucis", "graphics"}
     d = {k: design[k] for k in ("path", "bytes", "designer", "saved_by", "core", "usb_slots", "inventory", "pages") if k in design}
     comps = design["components"]
     if components:
@@ -137,6 +168,9 @@ def summarise(design: dict, components: list[str] | None = None, include: set[st
     d["wire_count"] = len(design["wires"])
     if "ucis" in include:
         d["ucis"] = design["ucis"]
+    if "graphics" in include:
+        d["graphics"] = design.get("graphics", [])
+    d["snapshot_banks"] = design.get("snapshot_banks", [])
     return d
 
 

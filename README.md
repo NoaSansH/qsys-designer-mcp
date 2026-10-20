@@ -13,7 +13,12 @@ An MCP server that lets Claude, or any other MCP client, build Q-SYS designs. Yo
   - Core and inventory I/O: Flex, Mic/Line, USB audio and HID, Software Dante, AES67
   - wires, by pin number or pin name
   - stored control values
-  - Text Controllers with your Lua and custom controls
+  - Text Controllers with your Lua, custom controls and control pins
+  - USB bridges of the Core and of I/O-USB Bridges (Speakerphone, soundcard, video), cameras and Design Properties
+  - control pins on any block, and installed schematic plugins
+  - signal names, on wires or instead of wires
+  - notes and group boxes on the schematic
+  - snapshot banks with their Snapshot Controllers, and their contents (`record_snapshots`)
   - multi-page schematics and multi-page UCIs
 - **Look things up.** `probe_components` tells you a component class's properties, pins and controls, and what I/O a Core offers. Claude doesn't have to guess names.
 - **Read any design back,** including ones it didn't build: components, properties, stored values, pins, wires and UCIs.
@@ -133,7 +138,7 @@ Because it relies on undocumented internals, any Designer update could break it.
 | Learn | `designer_versions`, `probe_components` |
 | Build and check | `build_design`, `read_design`, `check_design` |
 | Run | `designer_status`, `open_design`, `close_design`, `emulate_design`, `stop_emulation`, `list_dialogs`, `dialog_button`, `screenshot` |
-| Stored values | `calibrate_values` |
+| Stored values and snapshots | `calibrate_values`, `record_snapshots` |
 | Runtime (QRC) | `qrc_status`, `qrc_list_components`, `qrc_get_controls`, `qrc_set_control`, `qrc_named_controls`, `qrc_set_named_control`, `qrc_watch` |
 | Lua | `lua_check`, `new_plugin` |
 
@@ -143,7 +148,9 @@ There are three resources, `qsys://spec-format`, `qsys://lua-api` and `qsys://de
 
 - Emulation has no audio. It can't prove that signal flows, that an AEC converges, or that a gate or limiter acts. Signal paths are checked from the wiring.
 - USB HID call control (Teams/Zoom mute sync) can't be tested in emulation, because the PC side can't be simulated.
-- Snapshots, named controls, signal-name blocks and plugins aren't part of the spec yet. Third-party plugins can't be placed.
+- Named controls aren't part of the spec yet. A plugin must be installed (or given as a `.qplug` file) to be placed.
+- Snapshot contents are recorded in emulation, so the controls they hold must be settable there.
+- Block sizes are Designer's own: a long label is cut, so keep labels short.
 - Designer must be in English. Only menu and dialog names depend on the language.
 - Tested on Designer 9.13.1 and 10.3.0. Other versions should work, but they use the same undocumented internals, so try them on a copy first.
 

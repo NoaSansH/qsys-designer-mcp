@@ -19,6 +19,10 @@
 - `core.model`: optional. Use a name from `designer_versions` → `core_models`, e.g. `Core110f`. Spaces and case don't matter. The default is Designer's default core (Core 8 Flex).
 - `usb_sound_cards`: optional. The number of USB audio bridge slots on the Core (each is 2 in / 2 out). Each one adds two placeables, `USB Sound Card N In` (audio from the PC) and `USB Sound Card N Out` (audio to the PC).
 - `inventory`: optional extra inventory items. `type` is a class name from `designer_versions` → `inventory_types`. `name` names the item, and `set` sets public properties (e.g. `{"Count": 16}`). Check what an item offers with `probe_components(inventory=[...], include_placeables=true)`.
+  - Items built from a model need `model`, e.g. a camera: `{"type": "OnVifCamera", "model": "NC12x80", "name": "CAM-1"}`.
+  - Inventory names follow Designer's hostname rules: letters, digits and `-`. Designer drops anything else (an `_` disappears), and the build reports the rename. Component code names can still use `_`.
+- `core.usb_bridge` and an item's `usb_bridge` (I/O-USB Bridge...): settings of the USB bridge, by property name, e.g. `{"USBSlotType": "Speakerphone", "SpeakerphoneMode": "WithEchoCancel", "VideoBridge": true, "BridgeName": "Room-1", "ZoomRoom": false, "VideoFormat": "UCC"}`. With a slot type set, the item offers `USB EC Speakerphone 1 In` / `Out` (or the soundcard blocks), and `VideoBridge` adds `USB Video Bridge`.
+- `design_properties`: File > Design Properties, by property name, e.g. `{"PtpPriority1": 127, "QosPreset": "Audinate", "SoftwareDanteLatency": "Dn2000"}`.
 
 ## components
 
@@ -36,6 +40,10 @@ Each component needs exactly one of `class` or `inventory`.
 | `script_access` | `None` (default), `Script` (Lua only), `External` (QRC/third party and UCIs over the network) or `All`. Keep it minimal. `emulate_design` makes a test copy with everything set to `All`, so access doesn't need opening up for testing. |
 | `values` | Stored control values: `{"gain": -6, "mute": true, "frequency": 100}`. Numbers, booleans or strings. Use `{"value": v, "position": p}` to give the 0..1 position yourself. |
 | `text_controller` | For `device_controller_script` only: `{"controls": [...], "lua": "..."}`, or `"lua_file"` relative to `spec_dir`. |
+| `control_pins` | Control ids to expose as control pins (Properties > Control Pins), e.g. `["connected", "active"]` on a USB Speakerphone In, `["camera_status"]` on a camera. Wire them by pin name or by control id: `"USB_IN.out.connected"`. |
+| `plugin` | Instead of `class`: an installed schematic plugin, by its name (`"Category~Name"` or just `"Name"`) or id. It's looked for in Designer's Plugins and Assets folders under Documents\QSC. `plugin_file` takes a `.qplug` path instead. The plugin's code is saved inside the design. |
+
+`probe_components` lists each class's `property_choices`, so you can see what a numbered property means (for example `bandwidth_q_factor`: 0 Bandwidth, 1 Q-Factor).
 
 ### Stored values and positions
 
@@ -73,6 +81,44 @@ Write each wire as `["FROM.out.N", "TO.in.M"]`. A pin can be given by its 1-base
 - One output can feed many inputs.
 - Each input takes one wire.
 - Both ends must be on the same page.
+- A third element names the signal: `["MIX.out.1", "GAIN.in.1", "HP Left"]`, or `{"from", "to", "signal"}`. The name goes on the source pin, so Designer shows it on every wire leaving that pin. Give each output pin one name, and don't reuse a name on another output.
+
+## signals
+
+Connections by signal name, with no wire drawn, for pins that are far apart (or on different pages): Designer joins an output and the inputs that carry the same name.
+
+```json
+"signals": [["USB_IN.out.connected", "STATE.in.UsbConnected", "USB connected"]]
+```
+
+`{"from", "to", "signal"}` works too. The name goes on both pins; one output can feed several inputs by name, and an input fed by name can't also have a wire. `read_design` lists these under `signal_links` and counts them as connections in `check_design`.
+
+## graphics
+
+Notes and group boxes on the schematic:
+
+```json
+{"type": "group", "text": "INPUTS", "x": -40, "y": -90, "w": 330, "h": 640, "fill": "#40D32F2F", "bold": true, "font_size": 13},
+{"type": "text", "text": "Ceiling mic, AEC on", "x": 0, "y": 60, "w": 170, "h": 30, "font_size": 9, "align": "Left", "fill": "#FFFFF4C2"}
+```
+
+- `type`: `text` (a text block, transparent unless `fill` is set) or `group` (a titled group box).
+- Optional: `page`, `text_color`, `stroke_color`, `font`, `font_size`, `bold`, `align` (`Left`, `Center`, `Right`), `valign`, `corner_radius`, `stroke_width`, `z`.
+- Group boxes are drawn behind the blocks (z −100) unless `z` says otherwise.
+
+## snapshot_banks
+
+```json
+{"name": "Room_Modes", "count": 6, "controls": [
+   {"component": "MIX", "controls": ["input_1_output_1_mute", "input_2_output_1_mute"]},
+   {"component": "MIC_MUTE", "controls": ["mute"]},
+   {"component": "LEVELS", "all": true}],
+ "controller": {"name": "Room_Modes", "x": 900, "y": 600, "script_access": "External", "label": "Room modes"}}
+```
+
+- Creates the bank (Snapshots panel) with the listed controls, or with every control of a component (`all`).
+- `controller` places its Snapshot Controller on the schematic under that code name, usable by Lua, QRC and UCIs (`load_1`, `save_1`...). `mode` is `Normal`, `WriteProtect` or `Scene`.
+- The bank starts empty. Snapshot contents are written by the engine, not stored as control values: fill them with `record_snapshots`, which saves each snapshot in emulation and copies the result into the design. `read_design` shows which snapshots of each bank hold data.
 
 ## ucis
 

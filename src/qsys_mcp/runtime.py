@@ -146,3 +146,45 @@ async def calibrate(designer: Designer, qrc: QrcClient, path: str, discard_chang
         "hint": ("A value that is right when set live but wrong after a restart usually has a linked control "
                  "(e.g. Flex preamp gain and sensitivity): store the linked control too.") if mismatched else None,
     }
+
+
+async def record_snapshots(designer: Designer, qrc: QrcClient, path: str, snapshots: dict,
+                           discard_changes: bool = False) -> dict:
+    """Fill snapshot banks with content. Snapshot data is written by the engine, not stored as
+    control values, so each snapshot is saved for real: a test copy is emulated, the controls are
+    set over QRC, the bank's Snapshot Controller saves them, the copy is saved in Designer and the
+    banks' saved data is copied into the original file.
+
+    snapshots: {"BANK": {"controller": "CODE_NAME" (default: the bank name),
+                         "snapshots": {"1": [{"component": "MIX", "control": "input_1_output_1_mute", "value": 1}], ...}}}"""
+    path = os.path.abspath(path)
+    inst = headless.pick(for_file=path)
+    run = await emulate(designer, qrc, path, test_copy=True, discard_changes=discard_changes)
+    if not run.get("emulating"):
+        return {"path": path, "stopped_at": "emulate", **run}
+    copy_path = run["opened"]
+    saved, problems = {}, []
+    for bank, spec in snapshots.items():
+        controller = spec.get("controller", bank)
+        saved[bank] = []
+        for number, values in sorted(spec["snapshots"].items(), key=lambda kv: int(kv[0])):
+            for v in values:
+                await qrc.set(v["component"], v["control"], v["value"])
+            await asyncio.sleep(0.5)
+            for v in values:
+                got = (await qrc.get(v["component"], [v["control"]]))["Controls"][0].get("Value")
+                want = float(v["value"]) if not isinstance(v["value"], str) else v["value"]
+                if isinstance(want, float) and (got is None or abs(float(got) - want) > 1e-3):
+                    problems.append(f"{bank} {number}: {v['component']}.{v['control']} set {v['value']}, engine has {got}")
+            await qrc.set(controller, f"save_{number}", 1)
+            await asyncio.sleep(1.0)
+            saved[bank].append(int(number))
+    await asyncio.to_thread(designer.stop)
+    await asyncio.to_thread(designer.menu, "File->Save")
+    await asyncio.sleep(2)
+    await asyncio.to_thread(designer.close_designs, True)   # our own test copy, saved just above
+    res = headless.run({"command": "copy_snapshots", "from": copy_path, "path": path, "banks": list(snapshots)}, inst)
+    missing = {b: sorted(set(n) - set(res["copied"].get(b, []))) for b, n in saved.items()}
+    missing = {b: n for b, n in missing.items() if n}
+    return {"path": path, "saved_in_emulation": saved, "copied_into_design": res["copied"],
+            "not_copied": missing, "problems": problems}

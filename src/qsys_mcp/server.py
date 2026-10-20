@@ -127,9 +127,11 @@ def build_design(spec: dict, path: str, overwrite: bool = False, designer_versio
 @tool(READ_ONLY)
 def read_design(path: str, components: list[str] | None = None, sections: list[str] | None = None) -> dict:
     """Read a saved .qsys back: core, USB, inventory, pages, every component (class, name, Script Access,
-    properties, stored values with positions, pins), wires and UCIs. Uses the Designer version that
-    saved the file. Filter with components=[names] and sections (any of properties, values, pins,
-    wires, ucis) for big designs. Works on any design, not only ones built here."""
+    properties, stored values with positions, pins and their signal names), wires, UCIs, schematic
+    notes and group boxes, and snapshot banks (contents, controller, which snapshots hold data). Uses
+    the Designer version that saved the file. Filter with components=[names] and sections (any of
+    properties, values, pins, wires, ucis, graphics) for big designs. Works on any design, not only
+    ones built here."""
     d = designs.read(path)
     return designs.summarise(d, components, set(sections) if sections else None)
 
@@ -192,6 +194,16 @@ async def calibrate_values(path: str, discard_changes: bool = False) -> dict:
     confirms each value comes up as stored, reporting any linked controls. Measured positions are cached
     for future builds. Changes the file's stored positions only; closes any running Designer first."""
     return await runtime.calibrate(designer, qrc, path, discard_changes)
+
+
+@tool(WRITES_FILE)
+async def record_snapshots(path: str, snapshots: dict, discard_changes: bool = False) -> dict:
+    """Fill the snapshot banks of a design (built with spec.snapshot_banks). Snapshot contents are written
+    by the engine, so this emulates a test copy, sets the controls of each snapshot over QRC, presses the
+    bank's Save button, saves the copy and copies the banks' saved data into `path`. snapshots:
+    {"BANK": {"controller": "CODE_NAME", "snapshots": {"1": [{"component", "control", "value"}], ...}}}.
+    Only the listed banks change in `path`; closes any running Designer first."""
+    return await runtime.record_snapshots(designer, qrc, path, snapshots, discard_changes)
 
 
 @tool(READ_ONLY)
