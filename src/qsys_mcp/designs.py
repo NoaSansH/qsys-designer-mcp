@@ -19,6 +19,10 @@ NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_\-]*$")
 ENDPOINT_RE = re.compile(r"^(?P<name>.+)\.(?P<dir>in|out)\.(?P<pin>.+)$")
 # inputs that never pass signal to the block's outputs (the AEC subtracts its reference)
 NON_PASSING = {("acoustic_echo_canceler_simd", "Reference"), ("acoustic_echo_canceler", "Reference")}
+PLUGIN_PREFIX = "%PLUGIN%_"  # a plugin block's class is this + the plugin's id
+PLUGIN_KEYS = {"name", "id", "version"}
+# filled in by Designer from the installed plugin, never from a spec
+PLUGIN_SET_BY_DESIGNER = {"plugin_source", "plugin_is_encrypted"}
 
 
 class SpecError(ValueError):
@@ -42,8 +46,14 @@ def validate(spec: dict, base_dir: str | Path | None = None) -> tuple[dict, list
         elif name in names:
             problems.append(f"{where}: duplicate name {name}")
         names.add(name)
-        if bool(c.get("class")) == bool(c.get("inventory")):
-            problems.append(f"{name}: give exactly one of 'class' or 'inventory'")
+        if sum(bool(c.get(k)) for k in ("class", "inventory", "plugin")) != 1:
+            problems.append(f"{name}: give exactly one of 'class', 'inventory' or 'plugin'")
+        cls = c.get("class")
+        if isinstance(cls, str) and cls.startswith(PLUGIN_PREFIX):
+            problems.append(f"{name}: class {cls!r} is a plugin; write \"plugin\": {{\"id\": \"{cls[len(PLUGIN_PREFIX):]}\"}} instead")
+        if c.get("plugin"):
+            props = c.get("properties")
+            problems.extend(f"{name}: {p}" for p in _plugin_problems(c["plugin"], props if isinstance(props, dict) else {}))
         if c.get("page", pages[0]) not in pages:
             problems.append(f"{name}: page {c.get('page')!r} is not in spec.pages")
         if c.get("script_access", "None") not in ACCESS:
@@ -85,6 +95,28 @@ def validate(spec: dict, base_dir: str | Path | None = None) -> tuple[dict, list
     return spec, problems
 
 
+def _plugin_problems(plugin, properties: dict) -> list[str]:
+    """What's wrong with a component's 'plugin': a name or id, or {"name", "id", "version"}."""
+    problems = []
+    if isinstance(plugin, str):
+        if not plugin.strip():
+            problems.append("plugin is empty")
+    elif isinstance(plugin, dict):
+        unknown = sorted(set(plugin) - PLUGIN_KEYS)
+        if unknown:
+            problems.append(f"plugin has unknown keys {unknown} (use name, id and version)")
+        for k in sorted(PLUGIN_KEYS & set(plugin)):
+            if not isinstance(plugin[k], str) or not plugin[k].strip():
+                problems.append(f"plugin {k} must be a non-empty string" + (', e.g. "1.4.0"' if k == "version" else ""))
+        if not any(isinstance(plugin.get(k), str) and plugin[k].strip() for k in ("name", "id")):
+            problems.append("plugin needs a name or an id")
+    else:
+        problems.append("plugin must be the plugin's name or id, or {\"name\", \"id\", \"version\"}")
+    for k in sorted(PLUGIN_SET_BY_DESIGNER & set(properties)):
+        problems.append(f"property {k} comes from the installed plugin and can't be set")
+    return problems
+
+
 def build(spec: dict, path: str, overwrite: bool = False, designer_version: str | None = None,
           base_dir: str | None = None) -> dict:
     path = os.path.abspath(path)
@@ -123,13 +155,16 @@ def read(path: str, designer_version: str | None = None) -> dict:
 
 
 def summarise(design: dict, components: list[str] | None = None, include: set[str] | None = None) -> dict:
-    """Trim a read-back for display: optional component filter and sections."""
+    """Trim a read-back for display: optional component filter and sections. Lists the plugins used."""
     include = include or {"properties", "values", "pins", "wires", "ucis"}
     d = {k: design[k] for k in ("path", "bytes", "designer", "saved_by", "core", "usb_slots", "inventory", "pages") if k in design}
     comps = design["components"]
     if components:
         comps = [c for c in comps if c["name"] in components]
     d["component_count"] = len(design["components"])
+    plugins = _plugins(design["components"])
+    if plugins:
+        d["plugins"] = plugins
     d["components"] = [{k: v for k, v in c.items() if k not in {"properties", "values", "pins"} or k in include} for c in comps]
     if "wires" in include:
         d["wires"] = design["wires"] if not components else [w for w in design["wires"]
@@ -138,6 +173,17 @@ def summarise(design: dict, components: list[str] | None = None, include: set[st
     if "ucis" in include:
         d["ucis"] = design["ucis"]
     return d
+
+
+def _plugins(components: list[dict]) -> list[dict]:
+    """The plugins a read-back design uses, once per id and version, with the blocks that use them."""
+    found: dict[tuple, dict] = {}
+    for c in components:
+        p = c.get("plugin")
+        if p:
+            entry = found.setdefault((p.get("id") or c.get("class"), p.get("version")), {**p, "components": []})
+            entry["components"].append(c["name"])
+    return list(found.values())
 
 
 # ---- signal checks ------------------------------------------------------------------------

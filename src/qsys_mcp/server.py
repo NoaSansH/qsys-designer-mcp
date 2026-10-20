@@ -79,7 +79,8 @@ def tool(annotations: ToolAnnotations, *, image: bool = False):
 @tool(READ_ONLY)
 def designer_versions(version: str | None = None) -> dict:
     """Installed Q-SYS Designer versions (newest first), and for the chosen one (default: newest):
-    the core models and inventory item types it knows."""
+    the core models and inventory item types it knows, and the installed plugins (name, id, version,
+    file) a spec's "plugin" can name."""
     found = headless.installs()
     if not found:
         raise headless.HelperError("No Q-SYS Designer installation found (set QSYS_DESIGNER_DIR if it's somewhere unusual).")
@@ -91,12 +92,13 @@ def designer_versions(version: str | None = None) -> dict:
 @tool(READ_ONLY)
 def probe_components(classes: list[dict] | None = None, core_model: str | None = None, usb_sound_cards: int | None = None,
                      inventory: list[dict] | None = None, include_placeables: bool = False, include_controls: bool = True,
-                     designer_version: str | None = None) -> dict:
+                     plugins: list[dict | str] | None = None, designer_version: str | None = None) -> dict:
     """Learn component classes before using them. classes: [{"class": "mixer", "properties": {"n_inputs": 4}}]
     returns each class's resolved properties, pins (number + name) and controls (id, type, min/max).
     Unknown class names come back with an error, which is a safe way to test a name.
     include_placeables lists the Core's (and any inventory items') I/O blocks, e.g. 'Flex In',
-    'USB Sound Card 1 In', with their pins. Nothing is written."""
+    'USB Sound Card 1 In', with their pins. plugins: [{"plugin": "Name or id", "properties": {...}}]
+    does the same for installed plugins (see designer_versions). Nothing is written."""
     req: dict[str, Any] = {"command": "probe", "classes": classes or [], "placeables": include_placeables,
                            "controls": include_controls}
     if core_model:
@@ -105,9 +107,11 @@ def probe_components(classes: list[dict] | None = None, core_model: str | None =
         req["usb_sound_cards"] = usb_sound_cards
     if inventory:
         req["inventory"] = inventory
+    if plugins:
+        req["plugins"] = [p if isinstance(p, dict) else {"plugin": p} for p in plugins]
     out = headless.run(req, headless.pick(designer_version))
     if not include_controls:
-        for c in out.get("classes", []):
+        for c in out.get("classes", []) + out.get("plugins", []):
             c.pop("controls", None)
     return out
 
@@ -127,7 +131,8 @@ def build_design(spec: dict, path: str, overwrite: bool = False, designer_versio
 @tool(READ_ONLY)
 def read_design(path: str, components: list[str] | None = None, sections: list[str] | None = None) -> dict:
     """Read a saved .qsys back: core, USB, inventory, pages, every component (class, name, Script Access,
-    properties, stored values with positions, pins), wires and UCIs. Uses the Designer version that
+    properties, stored values with positions, pins), wires and UCIs. Plugin blocks also get plugin
+    {name, id, version, encrypted}, and the plugins used are listed. Uses the Designer version that
     saved the file. Filter with components=[names] and sections (any of properties, values, pins,
     wires, ucis) for big designs. Works on any design, not only ones built here."""
     d = designs.read(path)
