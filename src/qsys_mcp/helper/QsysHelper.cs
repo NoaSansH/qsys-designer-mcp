@@ -172,11 +172,13 @@ static class QsysHelper
         var core = Q.Get(doc, "Core");
         var models = Q.L(Q.Get(core, "Models")).Select(m => Convert.ToString(Q.TryGet(m, "Value") ?? Q.TryGet(m, "Model") ?? m)).ToList();
         var coreModelType = core.GetType().GetProperty("CoreModel", Q.All).PropertyType;
-        return new JObject {
+        var res = new JObject {
             { "designer_version", DesignerVersion() },
             { "default_core", Convert.ToString(Q.Get(core, "CoreModelPretty")) },
             { "core_models", new JArray(Enum.GetNames(coreModelType)) },
             { "inventory_types", new JArray(InventoryTypes().Select(t => t.Name)) } };
+        QHardware.AddInfo(res, core, InventoryTypes());   // features, usb_api, usb_bridge_types
+        return res;
     }
     static object _unused;
 
@@ -194,34 +196,28 @@ static class QsysHelper
         object manager;
         var doc = NewDocument(Path.Combine(Path.GetTempPath(), "qsys-mcp-probe.qsys"), out manager);
         var core = Q.Get(doc, "Core");
+        QHardware.Strict = false;   // a USB check that fails is reported, not fatal
         if (req["core_model"] != null) SetCoreModel(core, (string)req["core_model"]);
         if (req["usb_sound_cards"] != null) Q.Set(Q.Get(core, "UsbBridge"), "USBCount", (int)req["usb_sound_cards"]);
+        QHardware.Apply(doc, core, req);   // core.set, core.usb, design.set, as in a spec
         var res = new JObject { { "designer_version", DesignerVersion() }, { "core", Convert.ToString(Q.Get(core, "CoreModelPretty")) } };
         var itemsInfo = new JArray();
         foreach (var inv in (req["inventory"] as JArray ?? new JArray()))
-        {
-            var item = AddInventory(doc, (JObject)inv);
-            var props = new JObject();
-            foreach (var pi in item.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance))
-            {
-                if (!pi.CanWrite || pi.GetIndexParameters().Length > 0) continue;
-                var pt = pi.PropertyType;
-                if (!(pt.IsPrimitive || pt.IsEnum || pt == typeof(string))) continue;
-                object v = null; try { v = pi.GetValue(item, null); } catch { continue; }
-                props[pi.Name] = pt.IsEnum ? (JToken)(v + " (" + string.Join("|", Enum.GetNames(pt)) + ")") : JToken.FromObject(v ?? "");
-            }
-            itemsInfo.Add(new JObject { { "type", item.GetType().Name }, { "name", Convert.ToString(Q.Get(item, "Name")) }, { "settable", props } });
-        }
+            itemsInfo.Add(QHardware.ItemProbe(AddInventory(doc, (JObject)inv)));
         res["inventory_items"] = itemsInfo;
         var items = new JArray();
         foreach (var owner in new[] { core }.Concat(Q.L(Q.Get(doc, "Inventory")).Where(x => x != core)))
-            foreach (var pi in Q.L(Q.TryGet(owner, "PlaceableItems")))
+        {
+            var seen = new HashSet<string>();
+            foreach (var part in QHardware.WithParts(owner))   // the item's own blocks, then its USB bridge's and slots'
+            foreach (var pi in Q.L(Q.TryGet(part, "PlaceableItems")))
             {
                 var name = (string)Q.Get(pi, "Name");
+                if (!seen.Add(name)) continue;
                 var o = new JObject { { "item", Convert.ToString(Q.TryGet(owner, "Name")) }, { "placeable", name } };
                 try
                 {
-                    var c = Q.PlaceFromInventory(owner, name);
+                    var c = Q.PlaceFromInventory(part, name);
                     o["class"] = (string)Q.Get(c, "ClassName");
                     o["pins"] = PinInfo(c);
                     if ((bool?)req["controls"] == true) o["controls"] = ControlInfo(c);
@@ -229,6 +225,7 @@ static class QsysHelper
                 catch (Exception e) { o["error"] = (e.InnerException ?? e).Message; }
                 items.Add(o);
             }
+        }
         if ((bool?)req["placeables"] != false) res["placeables"] = items;
         var classes = new JArray();
         foreach (JObject spec in (req["classes"] as JArray ?? new JArray()))
@@ -249,6 +246,9 @@ static class QsysHelper
             classes.Add(o);
         }
         res["classes"] = classes;
+        if ((bool?)req["hardware"] == true) res["hardware"] = QHardware.Discover(doc, core, InventoryTypes());
+        if (QHardware.Applied.Count > 0) res["applied"] = QHardware.Applied;
+        if (QHardware.Warnings.Count > 0) res["warnings"] = QHardware.Warnings;
         return res;
     }
 
@@ -274,21 +274,11 @@ static class QsysHelper
 
     static object AddInventory(object doc, JObject spec)
     {
-        var typeName = (string)spec["type"];
-        var t = InventoryTypes().FirstOrDefault(x => x.Name == typeName);
-        if (t == null) throw new Exception("unknown inventory type '" + typeName + "' (see info.inventory_types)");
+        var t = QHardware.FindType(InventoryTypes(), (string)spec["type"]);
         var item = Activator.CreateInstance(t, true);
         ((IList)Q.Get(doc, "Inventory")).Add(item);
         if (spec["name"] != null) Q.Set(item, "Name", (string)spec["name"]);
-        var set = spec["set"] as JObject;
-        if (set != null)
-            foreach (var kv in set)
-            {
-                var p = item.GetType().GetProperty(kv.Key, Q.All);
-                if (p == null) throw new Exception(typeName + " has no property " + kv.Key);
-                object v = p.PropertyType.IsEnum ? Enum.Parse(p.PropertyType, (string)kv.Value, true) : Convert.ChangeType(Scalar(kv.Value), p.PropertyType);
-                p.SetValue(item, v, null);
-            }
+        QHardware.ApplyItem(item, spec);   // set (enums by name, label or number), usb
         return item;
     }
 
@@ -313,6 +303,7 @@ static class QsysHelper
             if (coreSpec["name"] != null) Q.Set(core, "Name", (string)coreSpec["name"]);
         }
         if (spec["usb_sound_cards"] != null) Q.Set(Q.Get(core, "UsbBridge"), "USBCount", (int)spec["usb_sound_cards"]);
+        QHardware.Apply(doc, core, spec);   // core.set, core.usb, design.set
         var inventory = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
         inventory[Convert.ToString(Q.Get(core, "Name"))] = core;
         foreach (JObject inv in (spec["inventory"] as JArray ?? new JArray()))
@@ -361,7 +352,7 @@ static class QsysHelper
                 string placeable = invSpec.Type == JTokenType.Object ? (string)invSpec["placeable"] : (string)invSpec;
                 object owner = itemName == null ? core : (inventory.ContainsKey(itemName) ? inventory[itemName] : null);
                 if (owner == null) throw new Exception(name + ": no inventory item '" + itemName + "'");
-                c = Q.PlaceFromInventory(owner, placeable);
+                c = QHardware.Place(owner, placeable, invSpec.Type == JTokenType.Object ? (string)invSpec["class"] : null);
             }
             else
             {
@@ -422,10 +413,12 @@ static class QsysHelper
         EndOperation(manager);
         AttachAll(doc);
         Save(doc, path);
-        return new JObject {
+        var res = new JObject {
             { "path", path }, { "bytes", new FileInfo(path).Length }, { "designer_version", DesignerVersion() },
             { "core", Convert.ToString(Q.Get(core, "CoreModelPretty")) }, { "components", comps.Count }, { "wires", wireCount },
             { "uci_elements", uciElements }, { "values", valuesOut }, { "warnings", warnings } };
+        QHardware.Report(res, warnings);   // "hardware": what was set
+        return res;
     }
 
     // "NAME.out.3", "NAME.in.2", "NAME.in.Reference" (pin name, case-insensitive)
@@ -652,12 +645,9 @@ static class QsysHelper
         var core = Q.Get(doc, "Core");
         var res = new JObject { { "path", path }, { "bytes", new FileInfo(path).Length }, { "designer_version", DesignerVersion() },
             { "core", new JObject { { "model", Convert.ToString(Q.Get(core, "CoreModelPretty")) }, { "name", Convert.ToString(Q.Get(core, "Name")) } } } };
-        var usb = new JArray();
-        foreach (var slot in Q.L(Q.TryGet(Q.TryGet(core, "UsbBridge") ?? new object(), "USBSlots")))
-            usb.Add(new JObject { { "name", Convert.ToString(Q.Get(slot, "Name")) }, { "type", Convert.ToString(Q.Get(slot, "UsbType")) },
-                { "inputs", Convert.ToString(Q.Get(slot, "InputCount")) }, { "outputs", Convert.ToString(Q.Get(slot, "OutputCount")) } });
-        res["usb_slots"] = usb;
-        res["inventory"] = new JArray(Q.L(Q.Get(doc, "Inventory")).Select(i => new JObject { { "type", i.GetType().Name }, { "name", Convert.ToString(Q.TryGet(i, "Name")) } }));
+        QHardware.Describe(doc, core, res);   // core.usb, core.settings, design.settings
+        res["usb_slots"] = QHardware.SlotInfo(core);
+        res["inventory"] = new JArray(Q.L(Q.Get(doc, "Inventory")).Select(i => QHardware.ItemInfo(i, core)));
 
         var wires = new List<object>(); var comps = new List<object>(); var pageOf = new Dictionary<object, string>();
         var pagesOut = new JArray();

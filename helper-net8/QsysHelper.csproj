@@ -24,6 +24,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../src/qsys_mcp/helper/QCommon.cs" />
+    <Compile Include="../src/qsys_mcp/helper/QHardware.cs" />
     <Compile Include="../src/qsys_mcp/helper/QsysHelper.cs" />
   </ItemGroup>
   <ItemGroup>
