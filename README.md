@@ -14,12 +14,14 @@ An MCP server that lets Claude, or any other MCP client, build Q-SYS designs. Yo
   - wires, by pin number or pin name
   - stored control values
   - Text Controllers with your Lua and custom controls
+  - snapshot banks and their controllers
   - multi-page schematics and multi-page UCIs
 - **Look things up.** `probe_components` tells you a component class's properties, pins and controls, and what I/O a Core offers. Claude doesn't have to guess names.
-- **Read any design back,** including ones it didn't build: components, properties, stored values, pins, wires and UCIs.
+- **Read any design back,** including ones it didn't build: components, properties, stored values, pins, wires, UCIs and snapshot banks.
 - **Check signal flow statically** over the real wiring, for example "mic 1 reaches the USB send", "the laptop never reaches the far end", "the echo canceller's reference carries the far end", or "no unconnected pins".
 - **Emulate and test.** It opens a test copy in Designer's emulator with every block visible to QRC, then reads and sets controls to test modes, mutes and script logic.
 - **Calibrate stored values.** It measures what the engine actually loads for each stored value and fixes the file if needed (more on why below).
+- **Save snapshots.** Only the engine writes snapshot data, so `save_snapshots` saves a spec's snapshot values on the emulator and keeps what Designer collects.
 
 It works with Designer **9.x** and **10.x**, and has been tested with 9.13.1 and 10.3.0. Files are read with the version that saved them. New builds use the newest install unless you pick one.
 
@@ -133,7 +135,7 @@ Because it relies on undocumented internals, any Designer update could break it.
 | Learn | `designer_versions`, `probe_components` |
 | Build and check | `build_design`, `read_design`, `check_design` |
 | Run | `designer_status`, `open_design`, `close_design`, `emulate_design`, `stop_emulation`, `list_dialogs`, `dialog_button`, `screenshot` |
-| Stored values | `calibrate_values` |
+| Stored values | `calibrate_values`, `save_snapshots` |
 | Runtime (QRC) | `qrc_status`, `qrc_list_components`, `qrc_get_controls`, `qrc_set_control`, `qrc_named_controls`, `qrc_set_named_control`, `qrc_watch` |
 | Lua | `lua_check`, `new_plugin` |
 
@@ -143,7 +145,7 @@ There are three resources, `qsys://spec-format`, `qsys://lua-api` and `qsys://de
 
 - Emulation has no audio. It can't prove that signal flows, that an AEC converges, or that a gate or limiter acts. Signal paths are checked from the wiring.
 - USB HID call control (Teams/Zoom mute sync) can't be tested in emulation, because the PC side can't be simulated.
-- Snapshots, named controls, signal-name blocks and plugins aren't part of the spec yet. Third-party plugins can't be placed.
+- Named controls, signal-name blocks and plugins aren't part of the spec yet. Third-party plugins can't be placed.
 - Designer must be in English. Only menu and dialog names depend on the language.
 - Tested on Designer 9.13.1 and 10.3.0. Other versions should work, but they use the same undocumented internals, so try them on a copy first.
 
