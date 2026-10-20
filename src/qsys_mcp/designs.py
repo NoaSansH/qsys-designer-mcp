@@ -119,6 +119,7 @@ def read(path: str, designer_version: str | None = None) -> dict:
     inst = headless.pick(designer_version, for_file=path)
     out = headless.run({"command": "read", "path": path}, inst)
     out["saved_by"] = headless.file_designer_version(path)
+    out["wires"] = [list(_wire_ends(w)) for w in out.get("wires", [])]
     return out
 
 
@@ -142,10 +143,20 @@ def summarise(design: dict, components: list[str] | None = None, include: set[st
 
 # ---- signal checks ------------------------------------------------------------------------
 
+def _wire_ends(w: list[str]) -> tuple[str, str]:
+    """A wire as (output, input). Designer saves a wire drawn from an input to an output the other way round."""
+    a, b = w
+    ma, mb = ENDPOINT_RE.match(a or ""), ENDPOINT_RE.match(b or "")
+    if ma and mb and ma["dir"] == "in" and mb["dir"] == "out":
+        return b, a
+    return a, b
+
+
 def _graph(design: dict):
     by_name = {c["name"]: c for c in design["components"]}
     edges: dict[str, list[str]] = {}
-    for a, b in design["wires"]:
+    for w in design["wires"]:
+        a, b = _wire_ends(w)
         edges.setdefault(a, []).append(b)
     for c in design["components"]:
         ins = [p for p in c["pins"] if p["dir"] == "in"]

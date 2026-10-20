@@ -88,3 +88,10 @@ def test_check_flags_missing_positions():
     d["components"][0]["values"] = {"gain": {"value": -6, "position": None}}
     r = designs.check(d)
     assert not next(x for x in r["results"] if x["check"] == "every stored value has a position")["pass"]
+
+
+def test_check_follows_wires_saved_input_first():
+    d = aec_design()
+    d["wires"] = [[b, a] if a.startswith("MIC") else [a, b] for a, b in d["wires"]]
+    r = designs.check(d, [{"from": "MIC", "to": "TX", "via": ["AEC"]}])
+    assert next(x for x in r["results"] if x["check"] == "MIC reaches TX")["pass"]
