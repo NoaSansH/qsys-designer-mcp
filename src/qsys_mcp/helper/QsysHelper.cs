@@ -96,6 +96,7 @@ static class QsysHelper
             foreach (var pg in Q.L(Q.Get(panel, "Pages")))
                 foreach (var el in Q.L(Q.Get(pg, "AllChildren")))
                     if (!(bool)Q.Get(el, "IsAttached")) Q.Call(el, "Attach");
+        QSnapshots.Attach(doc);
     }
 
     static void Save(object doc, string path) { Q.Call(Q.T("QSC.QSys.Design.FileIO"), "SaveImp", path, doc); }
@@ -106,17 +107,17 @@ static class QsysHelper
     {
         var list = new List<object>();
         foreach (var page in Q.L(Q.Get(doc, "Pages")))
-            list.AddRange(Q.L(Q.Get(page, "AllChildren")).Where(k => k.GetType().Name == "Component"));
+            list.AddRange(Q.L(Q.Get(page, "AllChildren")).Where(k => k.GetType().Name == "Component" || QSnapshots.IsController(k)));
         return list;
     }
 
-    static string NameOf(object comp)
+    internal static string NameOf(object comp)
     {
         var code = Convert.ToString(Q.TryGet(comp, "CodeName"));
         return string.IsNullOrEmpty(code) ? Convert.ToString(Q.Get(comp, "Label")) : code;
     }
 
-    static void SetAccess(object comp, string mode)
+    internal static void SetAccess(object comp, string mode)
     {
         if (Array.IndexOf(AccessModes, mode) < 0) throw new Exception("script_access must be one of " + string.Join(", ", AccessModes));
         var sa = comp.GetType().GetProperty("ScriptAccess", Q.All);
@@ -415,6 +416,9 @@ static class QsysHelper
             wireCount++;
         }
 
+        // snapshot banks, once the blocks they store exist; their controllers join comps, so UCIs can use their buttons
+        var snapshots = QSnapshots.Build(doc, spec["snapshots"] as JArray, comps, pages, pageNames[0], cache, warnings);
+
         // UCIs
         int uciElements = 0;
         foreach (JObject us in (spec["ucis"] as JArray ?? new JArray())) uciElements += BuildUci(doc, us, comps);
@@ -424,6 +428,7 @@ static class QsysHelper
         Save(doc, path);
         return new JObject {
             { "path", path }, { "bytes", new FileInfo(path).Length }, { "designer_version", DesignerVersion() },
+            { "snapshots", snapshots },
             { "core", Convert.ToString(Q.Get(core, "CoreModelPretty")) }, { "components", comps.Count }, { "wires", wireCount },
             { "uci_elements", uciElements }, { "values", valuesOut }, { "warnings", warnings } };
     }
@@ -456,7 +461,7 @@ static class QsysHelper
     // Value. Positions come from: an explicit "position", the calibration cache (measured on the
     // engine), or a rule. Rules are exact for booleans/integers and for the tapers measured so far;
     // anything else is reported as "assumed" so calibrate_values can confirm it.
-    static JObject StoreValue(object comp, string controlId, JToken spec, JArray cache)
+    internal static JObject StoreValue(object comp, string controlId, JToken spec, JArray cache)
     {
         var d = Descriptor(comp, controlId);
         if (d == null) throw new Exception(NameOf(comp) + " has no control " + controlId);
@@ -716,6 +721,7 @@ static class QsysHelper
         res["components"] = compsOut;
         res["wires"] = new JArray(wires.Select(w => new JArray(Ref(Q.Get(w, "PinA")), Ref(Q.Get(w, "PinB")))));
         var byId = comps.ToDictionary(c => Convert.ToString(Q.Get(c, "Id")), c => c);
+        foreach (var pc in QSnapshots.Controllers(doc)) byId[Convert.ToString(Q.Get(pc, "Id"))] = pc;
         var ucis = new JArray();
         foreach (var panel in Q.L(Q.Get(doc, "WebPanels")))
         {
@@ -745,6 +751,7 @@ static class QsysHelper
             ucis.Add(new JObject { { "name", Convert.ToString(Q.Get(panel, "Title")) }, { "pages", pagesJ } });
         }
         res["ucis"] = ucis;
+        res["snapshots"] = QSnapshots.Read(doc);
         return res;
     }
 
@@ -767,7 +774,8 @@ static class QsysHelper
         return new JObject { { "path", outPath }, { "values", done } };
     }
 
-    // copy: {path, out_path, script_access?} - a copy, optionally with every block's Script Access changed
+    // copy: {path, out_path, script_access?, script_access_map?} - a copy, optionally with every block's Script
+    // Access changed, and/or set per block from {name: mode} (to put a test copy's access back)
     static JObject Copy(JObject req)
     {
         var path = Path.GetFullPath((string)req["path"]);
@@ -777,6 +785,13 @@ static class QsysHelper
         int changed = 0;
         if (req["script_access"] != null)
             foreach (var c in AllComponents(doc)) { SetAccess(c, (string)req["script_access"]); changed++; }
+        var map = req["script_access_map"] as JObject;
+        if (map != null)
+            foreach (var c in AllComponents(doc))
+            {
+                var mode = (string)map[NameOf(c)];
+                if (mode != null) { SetAccess(c, mode); changed++; }
+            }
         Save(doc, outPath);
         return new JObject { { "path", outPath }, { "script_access_changed", changed } };
     }
