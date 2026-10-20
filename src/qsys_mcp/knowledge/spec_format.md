@@ -10,7 +10,8 @@
   "design": {"set": {"MtuValue": 1500}},
   "pages": ["Audio", "Control"],
   "components": [ ... ],
-  "wires": [ ["A.out.1", "B.in.1"], ... ],
+  "wires": [ ["A.out.1", "B.in.1"], ["A.out.2", "C.in.1", "PGM L"], ... ],
+  "graphics": [ ... ],
   "snapshots": [ ... ],
   "ucis": [ ... ]
 }
@@ -132,6 +133,50 @@ Control wires are written the same way. A control pin can also be named by its c
 - Each input takes one wire.
 - Both ends must be on the same page.
 
+### Signal names
+
+A third element connects the two pins by a Q-SYS Signal Name instead of a wire: `["FAR_END_MIX.out.4", "AEC_01.in.Reference", "AEC REF"]`, or `{"from": "FAR_END_MIX.out.4", "to": "AEC_01.in.Reference", "signal": "AEC REF"}`. Both pins get the name and no wire is drawn, the same as Designer's "Convert to Signal Names". Designer connects every pin that carries the same name.
+
+- A name has one source (an output) and any number of destinations. Repeat the entry for each destination, with the same source. The source is only labelled once.
+- Names are not case sensitive: `AEC REF` and `aec ref` are the same signal.
+- An output carries one name. It can have wires as well.
+- An input takes one wire or one name, not both.
+- Signal names can join pins on different pages.
+
+`read_design` gives each labelled pin a `signal`, and lists every name under `signals` with its `source` and `targets`. `check_design` counts a name as a connection from its source to each destination, and checks that every name has exactly one source.
+
+## graphics
+
+Notes and frames on the schematic: text, headers and group boxes. They don't change the design, only how it reads.
+
+```json
+"graphics": [
+  {"type": "header", "page": "Audio", "x": 20, "y": 20, "w": 900, "h": 40, "text": "BOARDROOM AUDIO", "font_size": 20, "bold": true},
+  {"type": "group_box", "page": "Audio", "x": 20, "y": 80, "w": 900, "h": 420, "text": "Microphones",
+   "stroke": "#FF4A90E2", "fill": "#1A4A90E2", "corner_radius": 6},
+  {"type": "text", "page": "Audio", "x": 40, "y": 520, "w": 320, "h": 60, "text": "AEC references come from FAR_END_MIX output 4",
+   "align": "Left", "valign": "Top"}
+]
+```
+
+| key | meaning |
+|---|---|
+| `type` | `text`, `header` or `group_box`. |
+| `page` | Schematic page (from `pages`). Defaults to the first. |
+| `x`, `y`, `w`, `h` | Position and size. The size defaults to 200 × 40 for text, 400 × 40 for a header and 400 × 300 for a group box. |
+| `text` | The text, or the group box's title. |
+| `font_size`, `bold` | Default 12 (16 for a header), not bold. |
+| `color` | Text colour. Default black. |
+| `fill`, `stroke` | Background and border colours. Text and group boxes only. A group box's border defaults to black. |
+| `stroke_width`, `corner_radius` | Border width (default 1 for a group box) and corner radius. Text and group boxes only. |
+| `align` | `Left`, `Center` or `Right`. |
+| `valign` | `Top`, `Center` or `Bottom`. Text only. |
+
+- Colours are `#AARRGGBB`. A light or translucent fill (a low alpha, like `#1A4A90E2`) keeps the blocks and wires inside a box readable.
+- Group boxes go behind everything already on their page, and text and headers in front of it (by ZOrder), each in list order.
+- Designer's property names for these objects aren't all known, so each key tries the likely ones. If none of them takes a value, `build_design` says so under `warnings` and lists the properties the object does have.
+- `read_design` lists each page's graphics under `graphics`, with their type, page, position, size and text.
+
 ## snapshots
 
 Each entry is a snapshot bank and its Snapshot Controller block, which has `load_1`..`load_N`, `save_1`..`save_N` and `ramp_time`.
@@ -199,7 +244,7 @@ Then run `save_snapshots(path, spec)`. It emulates a test copy, sets each snapsh
 Two tools check a built design:
 
 - `read_design` reads a saved file back. Each pin has its `domain` (`audio`, `control`, `video`...). A control pin added for a control has `user_created` and the control's code name in `control`, and a block with such pins lists them under `control_pins`, in the spec's form. `control_wire_count` counts the wires between control pins. For each UCI it reports the `width` and `height`, with Designer's names for its `aspect_ratio`, `orientation` and `panel_type`. For each UCI element it reports Designer's type (`ControlStyle`, `TextBlock`, `GroupBox` or `Header`), position, size, `z` order and `label` (a control's label, or the text of a text, group box or header), plus a group box's or header's styling under the spec's keys. If `sections` leaves out `ucis`, it lists only each UCI's name, size, pages and number of elements.
-- `check_design` runs static checks on it: unique names, unconnected signal pins, unused control pins, stored positions, and signal paths. Signal paths are written as `{"from": "FLEX_IN.out.3", "to": "USB_TX_CONF", "expect": false}`, with optional `via: [...]`. An AEC's Reference input counts as subtracted, not passed through.
+- `check_design` runs static checks on it: unique names, unconnected signal pins, unused control pins, one source per signal name, stored positions, and signal paths. Signal paths are written as `{"from": "FLEX_IN.out.3", "to": "USB_TX_CONF", "expect": false}`, with optional `via: [...]`. An AEC's Reference input counts as subtracted, not passed through.
 
 Signal and control stay apart in the checks. A block passes its signal inputs to its signal outputs and its control inputs to its control outputs. A path rule that starts at a control pin, such as `{"from": "USB_IN.out.connected", "to": "PROGRAM_GAIN", "via": ["ROOM_LOGIC"]}`, follows control wires, and a bare block name in `to` or `via` then means that block's control pins.
 

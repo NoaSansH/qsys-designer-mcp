@@ -149,11 +149,12 @@ def build_design(spec: dict, path: str, overwrite: bool = False, designer_versio
 def read_design(path: str, components: list[str] | None = None, sections: list[str] | None = None) -> dict:
     """Read a saved .qsys back: core (model, name, USB type/count/mode/video bridge, settings), the design's
     own settings (PTP, QoS, MTU...), USB slots, inventory (each item's settings and USB), pages, every
-    component (class, name, Script Access, properties, stored values with positions, pins with their domain,
-    control_pins), wires, UCIs and snapshot banks (members, controller block, which snapshots hold data).
-    Uses the Designer version that saved the file. Filter with components=[names] and sections (any of
-    properties, values, pins, wires, ucis, settings, snapshots) for big designs.
-    Works on any design, not only ones built here."""
+    component (class, name, Script Access, properties, stored values with positions, pins with their domain
+    and any Signal Name, control_pins), wires, Signal Names (signals: name, source, targets), schematic
+    graphics (text, headers, group boxes), UCIs and snapshot banks (members, controller block, which
+    snapshots hold data). Uses the Designer version that saved the file. Filter with components=[names]
+    and sections (any of properties, values, pins, wires, signals, graphics, ucis, settings, snapshots;
+    signals come with wires) for big designs. Works on any design, not only ones built here."""
     d = designs.read(path)
     return designs.summarise(d, components, set(sections) if sections else None)
 
@@ -165,6 +166,7 @@ def check_design(path: str, paths: list[dict] | None = None, allow_unconnected: 
     {"from": "FLEX_IN.out.3", "to": "USB_TX_CONF", "expect": false, "via": [...], "name": "..."}.
     'to' can be a component or a pin. An AEC's Reference input counts as subtracted, not passed on.
     A rule from a control pin ("USB_IN.out.connected") follows control wires instead of signal.
+    A Signal Name connects its source to every input carrying it, and must have exactly one source.
     allow_unconnected lists pins or components whose spare pins are intended."""
     return designs.check(designs.read(path), paths, allow_unconnected)
 
