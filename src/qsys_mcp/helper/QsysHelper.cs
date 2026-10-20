@@ -424,7 +424,8 @@ static class QsysHelper
 
         // UCIs
         int uciElements = 0;
-        foreach (JObject us in (spec["ucis"] as JArray ?? new JArray())) uciElements += BuildUci(doc, us, comps);
+        var uciSizes = new JArray();
+        foreach (JObject us in (spec["ucis"] as JArray ?? new JArray())) uciElements += BuildUci(doc, us, comps, uciSizes);
 
         EndOperation(manager);
         AttachAll(doc);
@@ -433,7 +434,7 @@ static class QsysHelper
             { "path", path }, { "bytes", new FileInfo(path).Length }, { "designer_version", DesignerVersion() },
             { "snapshots", snapshots },
             { "core", Convert.ToString(Q.Get(core, "CoreModelPretty")) }, { "components", comps.Count }, { "wires", wireCount },
-            { "uci_elements", uciElements }, { "values", valuesOut }, { "control_pins", controlPins }, { "warnings", warnings } };
+            { "uci_elements", uciElements }, { "uci_sizes", uciSizes }, { "values", valuesOut }, { "control_pins", controlPins }, { "warnings", warnings } };
         QHardware.Report(res, warnings);   // "hardware": what was set
         return res;
     }
@@ -582,11 +583,15 @@ static class QsysHelper
     static string Cap(string s) { return string.IsNullOrEmpty(s) ? s : char.ToUpperInvariant(s[0]) + s.Substring(1); }
 
     // ---- UCI ----------------------------------------------------------------------------
-    static int BuildUci(object doc, JObject us, Dictionary<string, object> comps)
+    static int BuildUci(object doc, JObject us, Dictionary<string, object> comps, JArray sizes)
     {
         var panel = Activator.CreateInstance(Q.T("QSC.QSys.Design.WebPanels.Panel"), true);
         Q.Set(panel, "Title", (string)us["name"]);
         ((IList)Q.Get(doc, "WebPanels")).Add(panel);
+        var size = new JObject { { "name", (string)us["name"] } };
+        if (us["width"] != null || us["height"] != null) QUci.SetSize(panel, (int?)us["width"] ?? 0, (int?)us["height"] ?? 0, size);
+        else QUci.ReadSize(panel, size);
+        sizes.Add(size);
         var pages = (IList)Q.Get(panel, "Pages");
         int count = 0, index = 0;
         foreach (JObject ps in (us["pages"] as JArray ?? new JArray()))
@@ -603,13 +608,16 @@ static class QsysHelper
             Q.Set(page, "Title", (string)ps["name"]);
             if (ps["color"] != null) Q.Set(page, "Color", Q.C((string)ps["color"]));
             var layer = Q.L(Q.Get(page, "Layers"))[0];
-            foreach (JObject es in (ps["elements"] as JArray ?? new JArray()))
+            // group boxes first: they get the page's lowest ZOrder, so they sit behind everything else on it
+            var elements = (ps["elements"] as JArray ?? new JArray()).Cast<JObject>().ToList();
+            foreach (var es in elements.Where(e => QUci.IsFrame(e)).Concat(elements.Where(e => !QUci.IsFrame(e))))
             {
                 var kind = (string)es["type"] ?? "control";
                 object el;
                 if (kind == "text") el = UciText(layer, es);
                 else if (kind == "control") el = UciControl(layer, es, comps);
-                else throw new Exception("UCI element type must be control or text, not " + kind);
+                else if (QUci.IsGraphic(kind)) el = QUci.Graphic(layer, kind, es);
+                else throw new Exception("UCI element type must be control, text, group_box or header, not " + kind);
                 Q.Set(el, "ZOrder", ++count);
             }
         }
@@ -739,6 +747,8 @@ static class QsysHelper
                     var size = Q.TryGet(el, "Size");
                     var eo = new JObject { { "type", el.GetType().Name }, { "x", pos.X }, { "y", pos.Y } };
                     if (size is System.Windows.Size) { eo["w"] = ((System.Windows.Size)size).Width; eo["h"] = ((System.Windows.Size)size).Height; }
+                    var z = Q.TryGet(el, "ZOrder");
+                    if (z != null) eo["z"] = Convert.ToInt32(z);
                     var label = Convert.ToString(Q.TryGet(el, "Label"));
                     if (!string.IsNullOrEmpty(label)) eo["label"] = label;
                     if (el.GetType().Name == "ControlStyle")
@@ -748,11 +758,15 @@ static class QsysHelper
                         eo["control"] = Convert.ToString(Q.Get(el, "Name"));
                         eo["style"] = Convert.ToString(Q.TryGet(el, "VisualStyle"));
                     }
+                    else QUci.ReadGraphic(el, eo);
                     els.Add(eo);
                 }
                 pagesJ.Add(new JObject { { "name", Convert.ToString(Q.Get(pg, "Title")) }, { "elements", els } });
             }
-            ucis.Add(new JObject { { "name", Convert.ToString(Q.Get(panel, "Title")) }, { "pages", pagesJ } });
+            var uo = new JObject { { "name", Convert.ToString(Q.Get(panel, "Title")) } };
+            QUci.ReadSize(panel, uo);
+            uo["pages"] = pagesJ;
+            ucis.Add(uo);
         }
         res["ucis"] = ucis;
         res["snapshots"] = QSnapshots.Read(doc);

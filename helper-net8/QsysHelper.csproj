@@ -28,6 +28,7 @@
     <Compile Include="../src/qsys_mcp/helper/QControlPins.cs" />
     <Compile Include="../src/qsys_mcp/helper/QSnapshots.cs" />
     <Compile Include="../src/qsys_mcp/helper/QsysHelper.cs" />
+    <Compile Include="../src/qsys_mcp/helper/QUci.cs" />
   </ItemGroup>
   <ItemGroup>
     <!-- compile-time only: at run time Designer's own copy is used, so its JSON attributes apply -->
