@@ -77,27 +77,33 @@ Write each wire as `["FROM.out.N", "TO.in.M"]`. A pin can be given by its 1-base
 ## ucis
 
 ```json
-{"name": "Touch Panel", "pages": [{"name": "Main", "color": "#FF1C1D21", "elements": [
+{"name": "Touch Panel", "width": 1280, "height": 800, "pages": [{"name": "Main", "color": "#FF1C1D21", "elements": [
   {"type": "text", "text": "ROOM VOLUME", "x": 30, "y": 320, "w": 300, "h": 30, "color": "#FFFFFFFF", "font_size": 18, "align": "Left"},
   {"type": "control", "component": "ROOM_MODE", "control": "MasterVolume", "x": 40, "y": 360, "w": 90, "h": 400,
    "style": "Fader", "color": "#FFD6D9DE"},
   {"type": "control", "component": "ROOM_MODE", "control": "MeetingMode", "x": 30, "y": 130, "w": 320, "h": 110,
-   "label": "MEETING", "color": "#FF2E7D32", "off_color": "#FF3A3B40", "text_color": "#FFFFFFFF", "font_size": 24, "corner_radius": 10}
+   "label": "MEETING", "color": "#FF2E7D32", "off_color": "#FF3A3B40", "text_color": "#FFFFFFFF", "font_size": 24, "corner_radius": 10},
+  {"type": "group_box", "text": "MODE", "x": 20, "y": 95, "w": 340, "h": 160, "font_size": 14, "bold": true, "color": "#FF9AA0A6",
+   "fill": "#20FFFFFF", "stroke": "#FF3A3B40", "stroke_width": 1, "corner_radius": 8},
+  {"type": "header", "text": "AUDIO", "x": 30, "y": 275, "w": 1030, "h": 30, "font_size": 16, "color": "#FF9AA0A6", "align": "Center"}
 ]}]}
 ```
 
+- `width` and `height` set the UCI's size in pixels. Give both, or neither to keep Designer's default. When they change the size, the builder also sets the panel type to Custom, the orientation (portrait when `height` is more than `width`) and the aspect ratio that matches, e.g. 16:10 for 1280 × 800. `build_design` reports the size each UCI ended up with under `uci_sizes`.
+- Element `type`s are `control` (the default), `text`, `group_box` (a frame with an optional title) and `header` (a title with a line).
+- `group_box` and `header` take `x`, `y`, `w`, `h`, `text`, `font_size`, `bold`, `color` (the text colour) and `align` (`Left`, `Center` or `Right`). A `group_box` also takes `fill`, `stroke`, `stroke_width` (whole pixels) and `corner_radius`. Leave a key out to keep Designer's default; without `text` there's no title.
 - `style` values include `Button`, `Knob`, `Fader`, `Text`, `Meter` and `Led`. If you leave it out, the control's default style is used.
 - Colours are `#AARRGGBB`.
-- Elements are drawn in list order, with later ones on top.
+- Elements are drawn in list order, with later ones on top. Group boxes are the exception: each page adds its group boxes first, so they get its lowest ZOrder and sit behind its other elements wherever they are in the list. Among themselves they keep list order, so list an outer box before the boxes inside it.
 - UCIs don't need Script Access.
-- Don't put graphic boxes behind controls: Designer draws them on top.
+- Graphics drawn behind controls may still cover them: Designer has drawn graphic boxes on top of controls before. Open a page with group boxes in Designer to check it, and give a box under controls a translucent `fill` (alpha below `FF`), so the controls stay visible either way.
 - A Lua script can set a button's text at runtime with `Controls.X.Legend = "..."`. For that to show, leave `label` unset.
 
 ## Checking a design
 
 Two tools check a built design:
 
-- `read_design` reads a saved file back.
+- `read_design` reads a saved file back. For each UCI it reports the `width` and `height`, with Designer's names for its `aspect_ratio`, `orientation` and `panel_type`. For each UCI element it reports Designer's type (`ControlStyle`, `TextBlock`, `GroupBox` or `Header`), position, size, `z` order and `label` (a control's label, or the text of a text, group box or header), plus a group box's or header's styling under the spec's keys. If `sections` leaves out `ucis`, it lists only each UCI's name, size, pages and number of elements.
 - `check_design` runs static checks on it: unique names, unconnected pins, stored positions, and signal paths. Signal paths are written as `{"from": "FLEX_IN.out.3", "to": "USB_TX_CONF", "expect": false}`, with optional `via: [...]`. An AEC's Reference input counts as subtracted, not passed through.
 
 For control logic, use `emulate_design` and then the `qrc_*` tools. Emulation has no audio: it can test control state, but not whether sound actually gets through.
