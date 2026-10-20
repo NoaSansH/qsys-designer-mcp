@@ -11,12 +11,13 @@ An MCP server that lets Claude, or any other MCP client, build Q-SYS designs. Yo
 - **Build designs headlessly.** A JSON spec in, a `.qsys` file out, in about a second, with no Designer window. It supports:
   - components by class name and their properties
   - Core and inventory I/O: Flex, Mic/Line, USB audio and HID, Software Dante, AES67
+  - hardware settings: USB speakerphone, sound cards and video bridge on the Core or an I/O-USB Bridge, device properties such as a camera's model, and the design's PTP, QoS, MTU and Software Dante settings
   - wires, by pin number or pin name
   - stored control values
   - Text Controllers with your Lua and custom controls
   - multi-page schematics and multi-page UCIs
 - **Look things up.** `probe_components` tells you a component class's properties, pins and controls, and what I/O a Core offers. Claude doesn't have to guess names.
-- **Read any design back,** including ones it didn't build: components, properties, stored values, pins, wires and UCIs.
+- **Read any design back,** including ones it didn't build: components, properties, stored values, pins, wires, UCIs and hardware settings.
 - **Check signal flow statically** over the real wiring, for example "mic 1 reaches the USB send", "the laptop never reaches the far end", "the echo canceller's reference carries the far end", or "no unconnected pins".
 - **Emulate and test.** It opens a test copy in Designer's emulator with every block visible to QRC, then reads and sets controls to test modes, mutes and script logic.
 - **Calibrate stored values.** It measures what the engine actually loads for each stored value and fixes the file if needed (more on why below).
