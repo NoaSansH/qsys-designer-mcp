@@ -19,6 +19,9 @@ NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_\-]*$")
 ENDPOINT_RE = re.compile(r"^(?P<name>.+)\.(?P<dir>in|out)\.(?P<pin>.+)$")
 # inputs that never pass signal to the block's outputs (the AEC subtracts its reference)
 NON_PASSING = {("acoustic_echo_canceler_simd", "Reference"), ("acoustic_echo_canceler", "Reference")}
+PIN_DIRS = ("in", "out", "both")
+# a Text Controller control's "pins" setting, as a pin direction
+PIN_STYLES = {"None": "none", "Input": "in", "Output": "out", "Both": "both"}
 
 
 class SpecError(ValueError):
@@ -34,6 +37,7 @@ def validate(spec: dict, base_dir: str | Path | None = None) -> tuple[dict, list
     pages = spec.get("pages") or ["Main"]
     spec["pages"] = pages
     names: set[str] = set()
+    pin_dirs: dict[str, dict[str, str | None]] = {}
     for i, c in enumerate(spec.get("components", [])):
         where = f"components[{i}]"
         name = c.get("name")
@@ -66,6 +70,7 @@ def validate(spec: dict, base_dir: str | Path | None = None) -> tuple[dict, list
                 chk = lua.check_syntax(tc["lua"])
                 if not chk["ok"]:
                     problems.append(f"{name}: Lua syntax error: {chk.get('error')}")
+        pin_dirs[name] = _control_pins(c, name, problems)
     for i, w in enumerate(spec.get("wires", [])):
         ends = w if isinstance(w, list) else [w.get("from"), w.get("to")]
         if len(ends) != 2:
@@ -77,12 +82,69 @@ def validate(spec: dict, base_dir: str | Path | None = None) -> tuple[dict, list
                 problems.append(f"wires[{i}]: {end!r} should look like NAME.{d}.N or NAME.{d}.PinName")
             elif m["name"] not in names:
                 problems.append(f"wires[{i}]: no component {m['name']}")
+            else:
+                have = pin_dirs.get(m["name"], {}).get(m["pin"].lower())
+                if have == "none":
+                    problems.append(f"wires[{i}]: {end!r}: the Text Controller control {m['pin']} has no pins (set its \"pins\")")
+                elif have in ("in", "out") and have != d:
+                    problems.append(f"wires[{i}]: {end!r}: {m['pin']} only has an {'input' if have == 'in' else 'output'} pin")
     for u in spec.get("ucis", []):
         for p in u.get("pages", []):
             for j, e in enumerate(p.get("elements", [])):
                 if e.get("type", "control") == "control" and e.get("component") not in names:
                     problems.append(f"UCI {u.get('name')}/{p.get('name')} element {j}: no component {e.get('component')}")
     return spec, problems
+
+
+def _control_pins(c: dict, name: str, problems: list[str]) -> dict[str, str | None]:
+    """Check a component's control_pins and Text Controller pins. Returns each control's pin direction
+    (lowercased name -> 'in', 'out', 'both', 'none', or None when Designer picks it) for the wire checks."""
+    dirs: dict[str, str | None] = {}
+    tc = c.get("text_controller") if isinstance(c.get("text_controller"), dict) else {}
+    own = set()
+    for ctl in tc.get("controls") or []:
+        if not isinstance(ctl, dict) or not ctl.get("name"):
+            continue
+        own.add(ctl["name"].lower())
+        style = ctl["pins"] if ctl.get("pins") is not None else "None"
+        key = style.capitalize() if isinstance(style, str) else None
+        if key not in PIN_STYLES:
+            problems.append(f"{name}: Text Controller control {ctl['name']}: pins must be None, Input, Output or Both, not {style!r}")
+        elif ctl.get("count", 1) == 1:   # an array's pins are named per element ("Name 1"...)
+            dirs[ctl["name"].lower()] = PIN_STYLES[key]
+    cps = c.get("control_pins")
+    if cps is None:
+        return dirs
+    if not isinstance(cps, list):
+        problems.append(f'{name}: control_pins must be a list of control names or {{"control": ..., "dir": ...}}')
+        return dirs
+    seen: set[str] = set()
+    for j, e in enumerate(cps):
+        where = f"{name}.control_pins[{j}]"
+        if isinstance(e, str):
+            ctl, d = e, None
+        elif isinstance(e, dict):
+            ctl, d = e.get("control"), e.get("dir")
+            extra = sorted(set(e) - {"control", "dir"})
+            if extra:
+                problems.append(f"{where}: unknown key(s) {', '.join(extra)}; use control and dir")
+        else:
+            problems.append(f'{where}: give a control code name or {{"control": ..., "dir": ...}}')
+            continue
+        if not isinstance(ctl, str) or not ctl:
+            problems.append(f"{where}: no control code name")
+            continue
+        if d is not None and d not in PIN_DIRS:
+            problems.append(f"{where}: dir must be in, out or both, not {d!r}")
+            d = None
+        if ctl in seen:
+            problems.append(f"{name}: control {ctl} is listed twice in control_pins")
+        elif ctl.lower() in own:
+            problems.append(f'{name}: {ctl} is one of the Text Controller\'s own controls: give it "pins" instead of a control_pins entry')
+        else:
+            dirs[ctl.lower()] = d
+        seen.add(ctl)
+    return dirs
 
 
 def build(spec: dict, path: str, overwrite: bool = False, designer_version: str | None = None,
@@ -120,7 +182,20 @@ def read(path: str, designer_version: str | None = None) -> dict:
     out = headless.run({"command": "read", "path": path}, inst)
     out["saved_by"] = headless.file_designer_version(path)
     out["wires"] = [list(_wire_ends(w)) for w in out.get("wires", [])]
+    for c in out.get("components", []):
+        shown = control_pins(c.get("pins", []))
+        if shown:
+            c["control_pins"] = shown
     return out
+
+
+def control_pins(pins: list[dict]) -> list[dict]:
+    """The control pins added to a component, in the spec's form: [{"control": "mute", "dir": "both"}, ...]."""
+    dirs: dict[str, set[str]] = {}
+    for p in pins:
+        if _is_added(p):
+            dirs.setdefault(p["control"], set()).add(p["dir"])
+    return [{"control": k, "dir": "both" if len(v) > 1 else next(iter(v))} for k, v in dirs.items()]
 
 
 def summarise(design: dict, components: list[str] | None = None, include: set[str] | None = None) -> dict:
@@ -136,12 +211,27 @@ def summarise(design: dict, components: list[str] | None = None, include: set[st
         d["wires"] = design["wires"] if not components else [w for w in design["wires"]
                                                              if any(w[0].startswith(n + ".") or w[1].startswith(n + ".") for n in components)]
     d["wire_count"] = len(design["wires"])
+    control = {_pid(c, p) for c in design["components"] for p in c.get("pins", []) if _is_control(p)}
+    d["control_wire_count"] = sum(1 for w in design["wires"] if w[0] in control or w[1] in control)
     if "ucis" in include:
         d["ucis"] = design["ucis"]
     return d
 
 
 # ---- signal checks ------------------------------------------------------------------------
+
+def _is_control(p: dict) -> bool:
+    return p.get("domain") == "control"
+
+
+def _is_added(p: dict) -> bool:
+    """A control pin added for a control, rather than one of the block's own."""
+    return _is_control(p) and bool(p.get("control")) and bool(p.get("user_created"))
+
+
+def _pid(c: dict, p: dict) -> str:
+    return f"{c['name']}.{p['dir']}.{p['index']}"
+
 
 def _wire_ends(w: list[str]) -> tuple[str, str]:
     """A wire as (output, input). Designer saves a wire drawn from an input to an output the other way round."""
@@ -159,25 +249,31 @@ def _graph(design: dict):
         a, b = _wire_ends(w)
         edges.setdefault(a, []).append(b)
     for c in design["components"]:
-        ins = [p for p in c["pins"] if p["dir"] == "in"]
         outs = [p for p in c["pins"] if p["dir"] == "out"]
-        for i in ins:
+        for i in (p for p in c["pins"] if p["dir"] == "in"):
             if (c["class"], i["name"]) in NON_PASSING:
                 continue
-            edges.setdefault(f"{c['name']}.in.{i['index']}", []).extend(f"{c['name']}.out.{o['index']}" for o in outs)
+            # a block passes each input to its outputs of the same kind: signal to signal, control to control
+            edges.setdefault(_pid(c, i), []).extend(_pid(c, o) for o in outs if _is_control(o) == _is_control(i))
     return by_name, edges
 
 
-def _pins(by_name: dict, ref: str) -> list[str]:
-    """'NAME' -> all its pins; 'NAME.in.N' / 'NAME.out.Name' -> that pin (by index or name)."""
+def _pins(by_name: dict, ref: str, kind: str | None = None) -> list[str]:
+    """'NAME' -> its pins (with kind 'signal' or 'control', only that kind when it has any);
+    'NAME.in.N' / 'NAME.out.Name' -> that pin, by index, name or (a control pin) control code name."""
     m = ENDPOINT_RE.match(ref)
     name = m["name"] if m else ref
     if name not in by_name:
         raise SpecError(f"no component {name}")
     pins = by_name[name]["pins"]
     if not m:
+        if kind:
+            pins = [p for p in pins if _is_control(p) == (kind == "control")] or pins
         return [f"{name}.{p['dir']}.{p['index']}" for p in pins]
-    hit = [p for p in pins if p["dir"] == m["dir"] and (str(p["index"]) == m["pin"] or p["name"].lower() == m["pin"].lower())]
+    want = m["pin"].lower()
+    hit = [p for p in pins if p["dir"] == m["dir"] and (str(p["index"]) == m["pin"] or (p["name"] or "").lower() == want)]
+    if not hit:
+        hit = [p for p in pins if p["dir"] == m["dir"] and (p.get("control") or "").lower() == want]
     if not hit:
         raise SpecError(f"{name} has no {m['dir']} pin {m['pin']!r}")
     return [f"{name}.{p['dir']}.{p['index']}" for p in hit]
@@ -201,7 +297,12 @@ def check(design: dict, paths: list[dict] | None = None, allow_unconnected: list
       'to' may be a component (any of its inputs) or a pin; expect defaults to true.
       AEC Reference inputs don't pass signal (the AEC subtracts them), so a far-end feed reaching
       a reference doesn't count as reaching the AEC's output.
-    allow_unconnected: pins or components whose unconnected pins are intended (spare I/O etc.)."""
+      Signal and control stay apart: a block passes signal inputs to signal outputs and control inputs
+      to control outputs. A rule from a control pin follows control wires, and then a bare component
+      name in 'to' or 'via' means that block's control pins; otherwise it means its signal pins.
+    allow_unconnected: pins or components whose unconnected pins are intended (spare I/O etc.).
+    Unconnected signal pins are one check. Control pins added for controls are another: a control none
+    of whose pins is wired fails it. A block's own control pins (logic inputs and the like) aren't checked."""
     by_name, edges = _graph(design)
     results = []
 
@@ -213,23 +314,36 @@ def check(design: dict, paths: list[dict] | None = None, allow_unconnected: list
     allowed = set()
     for a in allow_unconnected or []:
         allowed.update(_pins(by_name, a))
-    loose = [f"{c['name']}.{p['dir']}.{p['index']} ({p['name']})" for c in design["components"] for p in c["pins"]
-             if f"{c['name']}.{p['dir']}.{p['index']}" not in connected and f"{c['name']}.{p['dir']}.{p['index']}" not in allowed]
+    loose = [f"{_pid(c, p)} ({p['name']})" for c in design["components"] for p in c["pins"]
+             if not _is_control(p) and _pid(c, p) not in connected and _pid(c, p) not in allowed]
     results.append({"check": "no unexpected unconnected pins", "pass": not loose, "detail": loose[:60] or "none"})
+
+    unused = []
+    for c in design["components"]:
+        shown: dict[str, list[dict]] = {}
+        for p in c["pins"]:
+            if _is_added(p):
+                shown.setdefault(p["control"], []).append(p)
+        for control, ps in shown.items():
+            if not any(_pid(c, p) in connected or _pid(c, p) in allowed for p in ps):
+                unused.append(f"{c['name']}.{control} ({'/'.join(p['dir'] for p in ps)})")
+    results.append({"check": "no unused control pins", "pass": not unused, "detail": unused[:60] or "none"})
 
     nan = [f"{c['name']}.{k}" for c in design["components"] for k, v in c.get("values", {}).items()
            if "value" in v and v.get("position") is None]
     results.append({"check": "every stored value has a position", "pass": not nan, "detail": nan or "ok"})
 
+    control_pin = {_pid(c, p) for c in design["components"] for p in c["pins"] if _is_control(p)}
     for rule in paths or []:
         expect = rule.get("expect", True)
-        start = _pins(by_name, rule["from"])
+        start = _pins(by_name, rule["from"], "signal")
+        kind = "control" if start and all(s in control_pin for s in start) else "signal"
         reached = _reach(edges, start)
-        targets = _pins(by_name, rule["to"])
+        targets = _pins(by_name, rule["to"], kind)
         if ENDPOINT_RE.match(rule["to"]) is None:
             targets = [t for t in targets if ".in." in t]
         hit = any(t in reached for t in targets)
-        via_missing = [v for v in rule.get("via", []) if not any(p in reached for p in _pins(by_name, v))]
+        via_missing = [v for v in rule.get("via", []) if not any(p in reached for p in _pins(by_name, v, kind))]
         ok = (hit == expect) and (not expect or not via_missing)
         label = rule.get("name") or f"{rule['from']} {'reaches' if expect else 'does NOT reach'} {rule['to']}"
         detail = {"reached": hit}
