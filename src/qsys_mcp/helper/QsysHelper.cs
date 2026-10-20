@@ -423,6 +423,9 @@ static partial class QsysHelper
         }
         int signalCount = signals.Apply();
 
+        // schematic text, headers and group boxes (QsysHelper.Graphics.cs)
+        int graphicCount = BuildGraphics(spec["graphics"] as JArray, pages, pageNames[0], warnings);
+
         // UCIs
         int uciElements = 0;
         foreach (JObject us in (spec["ucis"] as JArray ?? new JArray())) uciElements += BuildUci(doc, us, comps);
@@ -433,7 +436,7 @@ static partial class QsysHelper
         return new JObject {
             { "path", path }, { "bytes", new FileInfo(path).Length }, { "designer_version", DesignerVersion() },
             { "core", Convert.ToString(Q.Get(core, "CoreModelPretty")) }, { "components", comps.Count }, { "wires", wireCount },
-            { "signals", signalCount }, { "uci_elements", uciElements }, { "values", valuesOut }, { "warnings", warnings } };
+            { "signals", signalCount }, { "graphics", graphicCount }, { "uci_elements", uciElements }, { "values", valuesOut }, { "warnings", warnings } };
     }
 
     // "NAME.out.3", "NAME.in.2", "NAME.in.Reference" (pin name, case-insensitive)
@@ -724,6 +727,7 @@ static partial class QsysHelper
         res["components"] = compsOut;
         res["wires"] = new JArray(wires.Select(w => new JArray(Ref(Q.Get(w, "PinA")), Ref(Q.Get(w, "PinB")))));
         res["signals"] = ReadSignals(comps, Ref);
+        res["graphics"] = ReadGraphics(doc);
         var byId = comps.ToDictionary(c => Convert.ToString(Q.Get(c, "Id")), c => c);
         var ucis = new JArray();
         foreach (var panel in Q.L(Q.Get(doc, "WebPanels")))

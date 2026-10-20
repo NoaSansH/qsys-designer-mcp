@@ -19,6 +19,10 @@ NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_\-]*$")
 ENDPOINT_RE = re.compile(r"^(?P<name>.+)\.(?P<dir>in|out)\.(?P<pin>.+)$")
 # inputs that never pass signal to the block's outputs (the AEC subtracts its reference)
 NON_PASSING = {("acoustic_echo_canceler_simd", "Reference"), ("acoustic_echo_canceler", "Reference")}
+# schematic graphics, and the keys each type doesn't have
+GRAPHICS = {"text": set(), "header": {"fill", "stroke", "stroke_width", "corner_radius", "valign"}, "group_box": {"valign"}}
+ALIGN = {"align": ("Left", "Center", "Right"), "valign": ("Top", "Center", "Bottom")}
+COLOUR_RE = re.compile(r"#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})")
 
 
 class SpecError(ValueError):
@@ -67,6 +71,7 @@ def validate(spec: dict, base_dir: str | Path | None = None) -> tuple[dict, list
                 if not chk["ok"]:
                     problems.append(f"{name}: Lua syntax error: {chk.get('error')}")
     _validate_wires(spec.get("wires", []), names, problems)
+    _validate_graphics(spec.get("graphics", []), pages, problems)
     for u in spec.get("ucis", []):
         for p in u.get("pages", []):
             for j, e in enumerate(p.get("elements", [])):
@@ -126,6 +131,32 @@ def _validate_wires(wires: list, names: set[str], problems: list[str]) -> None:
             problems.append(f"wires[{i}]: {ends[1]} already takes signal {prev[0]!r} (wires[{prev[1]}])")
 
 
+def _validate_graphics(graphics: list, pages: list[str], problems: list[str]) -> None:
+    """Schematic text, headers and group boxes: type, page, alignment, colours and numbers."""
+    for i, g in enumerate(graphics):
+        where = f"graphics[{i}]"
+        if not isinstance(g, dict) or g.get("type") not in GRAPHICS:
+            problems.append(f"{where}: type must be one of {', '.join(GRAPHICS)}")
+            continue
+        if g.get("page", pages[0]) not in pages:
+            problems.append(f"{where}: page {g.get('page')!r} is not in spec.pages")
+        for k in sorted(g.keys() & GRAPHICS[g["type"]]):
+            problems.append(f"{where}: a {g['type']} has no {k}")
+        for k, allowed in ALIGN.items():
+            if k in g and str(g[k]).lower() not in {a.lower() for a in allowed}:
+                problems.append(f"{where}: {k} must be one of {', '.join(allowed)}")
+        for k in ("color", "fill", "stroke"):
+            if k in g and not (isinstance(g[k], str) and COLOUR_RE.fullmatch(g[k])):
+                problems.append(f"{where}: {k} {g[k]!r} should be a colour like #FF336699 (#AARRGGBB)")
+        for k in ("x", "y", "w", "h", "font_size", "stroke_width", "corner_radius"):
+            if k in g and (isinstance(g[k], bool) or not isinstance(g[k], (int, float))):
+                problems.append(f"{where}: {k} must be a number")
+        if "bold" in g and not isinstance(g["bold"], bool):
+            problems.append(f"{where}: bold must be true or false")
+        if "text" in g and not isinstance(g["text"], str):
+            problems.append(f"{where}: text must be a string")
+
+
 def _pin_key(end: str) -> tuple:
     """A wire endpoint as (component, dir, pin number or lower-case pin name)."""
     m = ENDPOINT_RE.match(end)
@@ -176,7 +207,7 @@ def read(path: str, designer_version: str | None = None) -> dict:
 
 def summarise(design: dict, components: list[str] | None = None, include: set[str] | None = None) -> dict:
     """Trim a read-back for display: optional component filter and sections (signals come with wires)."""
-    include = include or {"properties", "values", "pins", "wires", "signals", "ucis"}
+    include = include or {"properties", "values", "pins", "wires", "signals", "graphics", "ucis"}
     d = {k: design[k] for k in ("path", "bytes", "designer", "saved_by", "core", "usb_slots", "inventory", "pages") if k in design}
     comps = design["components"]
     if components:
@@ -191,6 +222,8 @@ def summarise(design: dict, components: list[str] | None = None, include: set[st
         d["signals"] = design["signals"] if not components else [
             s for s in design["signals"] if any(r and r.startswith(n + ".") for n in components
                                                 for r in [s.get("source"), *s["targets"], *s.get("extra_sources", [])])]
+    if "graphics" in design and "graphics" in include:
+        d["graphics"] = design["graphics"]
     if "ucis" in include:
         d["ucis"] = design["ucis"]
     return d

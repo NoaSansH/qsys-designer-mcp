@@ -203,3 +203,42 @@ def test_summarise_keeps_signals():
     assert designs.summarise(d, ["MIC"])["signals"] == []
     assert designs.summarise(d, include={"wires"})["signals"] == d["signals"]
     assert "signals" not in designs.summarise(d, include={"pins"})
+
+
+# ---- schematic graphics -----------------------------------------------------------------------
+
+def test_validate_graphics():
+    spec = {"pages": ["Audio", "Control"], "graphics": [
+        {"type": "group_box", "x": 20, "y": 20, "w": 900, "h": 400, "text": "Microphones",
+         "fill": "#1A4A90E2", "stroke": "#FF4A90E2", "stroke_width": 2, "corner_radius": 6, "align": "Left"},
+        {"type": "header", "page": "Control", "text": "CONTROL", "font_size": 20, "bold": True, "align": "center"},
+        {"type": "text", "page": "Audio", "text": "AEC REF comes from MIX output 4", "valign": "Top", "color": "#333333"},
+    ]}
+    assert designs.validate(spec)[1] == []
+    spec["graphics"] = [
+        {"type": "image"},
+        {"type": "text", "page": "Nope"},
+        {"type": "header", "fill": "#FF000000", "valign": "Top"},
+        {"type": "group_box", "valign": "Top"},
+        {"type": "text", "align": "Justify", "color": "red", "w": "wide", "bold": "yes"},
+    ]
+    _, problems = designs.validate(spec)
+    assert problems == [
+        "graphics[0]: type must be one of text, header, group_box",
+        "graphics[1]: page 'Nope' is not in spec.pages",
+        "graphics[2]: a header has no fill",
+        "graphics[2]: a header has no valign",
+        "graphics[3]: a group_box has no valign",
+        "graphics[4]: align must be one of Left, Center, Right",
+        "graphics[4]: color 'red' should be a colour like #FF336699 (#AARRGGBB)",
+        "graphics[4]: w must be a number",
+        "graphics[4]: bold must be true or false",
+    ]
+
+
+def test_summarise_keeps_graphics():
+    d = design([comp("MIC")], [])
+    d.update(ucis=[], graphics=[{"type": "text", "page": "Main", "x": 0, "y": 0, "w": 200, "h": 40, "text": "note"}])
+    assert designs.summarise(d)["graphics"] == d["graphics"]
+    assert designs.summarise(d, ["MIC"])["graphics"] == d["graphics"]
+    assert "graphics" not in designs.summarise(d, include={"wires"})

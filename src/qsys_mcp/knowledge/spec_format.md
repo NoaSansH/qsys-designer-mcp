@@ -10,6 +10,7 @@
   "pages": ["Audio", "Control"],
   "components": [ ... ],
   "wires": [ ["A.out.1", "B.in.1"], ["A.out.2", "C.in.1", "PGM L"], ... ],
+  "graphics": [ ... ],
   "ucis": [ ... ]
 }
 ```
@@ -85,6 +86,38 @@ A third element connects the two pins by a Q-SYS Signal Name instead of a wire: 
 - Signal names can join pins on different pages.
 
 `read_design` gives each labelled pin a `signal`, and lists every name under `signals` with its `source` and `targets`. `check_design` counts a name as a connection from its source to each destination, and checks that every name has exactly one source.
+
+## graphics
+
+Notes and frames on the schematic: text, headers and group boxes. They don't change the design, only how it reads.
+
+```json
+"graphics": [
+  {"type": "header", "page": "Audio", "x": 20, "y": 20, "w": 900, "h": 40, "text": "BOARDROOM AUDIO", "font_size": 20, "bold": true},
+  {"type": "group_box", "page": "Audio", "x": 20, "y": 80, "w": 900, "h": 420, "text": "Microphones",
+   "stroke": "#FF4A90E2", "fill": "#1A4A90E2", "corner_radius": 6},
+  {"type": "text", "page": "Audio", "x": 40, "y": 520, "w": 320, "h": 60, "text": "AEC references come from FAR_END_MIX output 4",
+   "align": "Left", "valign": "Top"}
+]
+```
+
+| key | meaning |
+|---|---|
+| `type` | `text`, `header` or `group_box`. |
+| `page` | Schematic page (from `pages`). Defaults to the first. |
+| `x`, `y`, `w`, `h` | Position and size. The size defaults to 200 × 40 for text, 400 × 40 for a header and 400 × 300 for a group box. |
+| `text` | The text, or the group box's title. |
+| `font_size`, `bold` | Default 12 (16 for a header), not bold. |
+| `color` | Text colour. Default black. |
+| `fill`, `stroke` | Background and border colours. Text and group boxes only. A group box's border defaults to black. |
+| `stroke_width`, `corner_radius` | Border width (default 1 for a group box) and corner radius. Text and group boxes only. |
+| `align` | `Left`, `Center` or `Right`. |
+| `valign` | `Top`, `Center` or `Bottom`. Text only. |
+
+- Colours are `#AARRGGBB`. A light or translucent fill (a low alpha, like `#1A4A90E2`) keeps the blocks and wires inside a box readable.
+- Group boxes go behind everything already on their page, and text and headers in front of it (by ZOrder), each in list order.
+- Designer's property names for these objects aren't all known, so each key tries the likely ones. If none of them takes a value, `build_design` says so under `warnings` and lists the properties the object does have.
+- `read_design` lists each page's graphics under `graphics`, with their type, page, position, size and text.
 
 ## ucis
 
