@@ -93,8 +93,10 @@ def probe_components(classes: list[dict] | None = None, core_model: str | None =
                      inventory: list[dict] | None = None, include_placeables: bool = False, include_controls: bool = True,
                      designer_version: str | None = None) -> dict:
     """Learn component classes before using them. classes: [{"class": "mixer", "properties": {"n_inputs": 4}}]
-    returns each class's resolved properties, pins (number + name) and controls (id, type, min/max).
-    Unknown class names come back with an error, which is a safe way to test a name.
+    returns each class's resolved properties, pins (number, name, domain) and controls (id, type, min/max,
+    and under "pin" the control pin directions it offers). A class can also take "control_pins" as in a
+    spec, to see the pins it would get. Unknown class names come back with an error, which is a safe way
+    to test a name.
     include_placeables lists the Core's (and any inventory items') I/O blocks, e.g. 'Flex In',
     'USB Sound Card 1 In', with their pins. Nothing is written."""
     req: dict[str, Any] = {"command": "probe", "classes": classes or [], "placeables": include_placeables,
@@ -120,26 +122,28 @@ def build_design(spec: dict, path: str, overwrite: bool = False, designer_versio
     """Build a .qsys file from a spec (see qsys://spec-format), headlessly. Refuses to replace an
     existing file unless overwrite=True; only do that when the user asked for it. spec_dir is where
     relative lua_file paths are found. designer_version picks an install (e.g. '10.3'); default is
-    the newest. Returns counts, warnings and any stored values whose taper is assumed."""
+    the newest. Returns counts, warnings, the control pins added (with how Designer added each) and any
+    stored values whose taper is assumed."""
     return designs.build(spec, path, overwrite, designer_version, spec_dir)
 
 
 @tool(READ_ONLY)
 def read_design(path: str, components: list[str] | None = None, sections: list[str] | None = None) -> dict:
     """Read a saved .qsys back: core, USB, inventory, pages, every component (class, name, Script Access,
-    properties, stored values with positions, pins), wires and UCIs. Uses the Designer version that
-    saved the file. Filter with components=[names] and sections (any of properties, values, pins,
-    wires, ucis) for big designs. Works on any design, not only ones built here."""
+    properties, stored values with positions, pins with their domain, control_pins), wires and UCIs.
+    Uses the Designer version that saved the file. Filter with components=[names] and sections (any of
+    properties, values, pins, wires, ucis) for big designs. Works on any design, not only ones built here."""
     d = designs.read(path)
     return designs.summarise(d, components, set(sections) if sections else None)
 
 
 @tool(READ_ONLY)
 def check_design(path: str, paths: list[dict] | None = None, allow_unconnected: list[str] | None = None) -> dict:
-    """Static checks on a saved design: unique names, unconnected pins, stored values have positions,
-    and signal-path rules over the actual wiring, e.g.
+    """Static checks on a saved design: unique names, unconnected signal pins, unused control pins, stored
+    values have positions, and signal-path rules over the actual wiring, e.g.
     {"from": "FLEX_IN.out.3", "to": "USB_TX_CONF", "expect": false, "via": [...], "name": "..."}.
     'to' can be a component or a pin. An AEC's Reference input counts as subtracted, not passed on.
+    A rule from a control pin ("USB_IN.out.connected") follows control wires instead of signal.
     allow_unconnected lists pins or components whose spare pins are intended."""
     return designs.check(designs.read(path), paths, allow_unconnected)
 
