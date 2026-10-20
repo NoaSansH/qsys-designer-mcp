@@ -79,7 +79,8 @@ def tool(annotations: ToolAnnotations, *, image: bool = False):
 @tool(READ_ONLY)
 def designer_versions(version: str | None = None) -> dict:
     """Installed Q-SYS Designer versions (newest first), and for the chosen one (default: newest):
-    the core models and inventory item types it knows."""
+    the core models and inventory item types it knows, the inventory types with a USB bridge
+    (usb_bridge_types: speakerphone, sound card, video bridge) and the helper's features."""
     found = headless.installs()
     if not found:
         raise headless.HelperError("No Q-SYS Designer installation found (set QSYS_DESIGNER_DIR if it's somewhere unusual).")
@@ -91,21 +92,37 @@ def designer_versions(version: str | None = None) -> dict:
 @tool(READ_ONLY)
 def probe_components(classes: list[dict] | None = None, core_model: str | None = None, usb_sound_cards: int | None = None,
                      inventory: list[dict] | None = None, include_placeables: bool = False, include_controls: bool = True,
-                     designer_version: str | None = None) -> dict:
+                     designer_version: str | None = None, core: dict | None = None, include_hardware: bool = False) -> dict:
     """Learn component classes before using them. classes: [{"class": "mixer", "properties": {"n_inputs": 4}}]
     returns each class's resolved properties, pins (number + name) and controls (id, type, min/max).
     Unknown class names come back with an error, which is a safe way to test a name.
     include_placeables lists the Core's (and any inventory items') I/O blocks, e.g. 'Flex In',
-    'USB Sound Card 1 In', with their pins. Nothing is written."""
+    'USB Sound Card 1 In', with their pins. core and inventory take the spec's keys
+    (core: {"model", "set", "usb"}; items: {"type", "name", "set", "usb"}), so their blocks can be seen
+    before building; each item comes back with its settable properties (enums with their choices).
+    include_hardware adds what can be set on the Core, its USB bridge and slots, and the design
+    (design.set: PTP, QoS, MTU, Software Dante). Nothing is written."""
+    if core or inventory:
+        _, problems = designs.validate({"core": core or {}, "inventory": inventory or [], "usb_sound_cards": usb_sound_cards})
+        if problems:
+            raise designs.SpecError("problems:\n- " + "\n- ".join(problems))
     req: dict[str, Any] = {"command": "probe", "classes": classes or [], "placeables": include_placeables,
                            "controls": include_controls}
+    if core:
+        req["core"] = core
+        core_model = core_model or core.get("model")
     if core_model:
         req["core_model"] = core_model
     if usb_sound_cards is not None:
         req["usb_sound_cards"] = usb_sound_cards
     if inventory:
         req["inventory"] = inventory
-    out = headless.run(req, headless.pick(designer_version))
+    if include_hardware:
+        req["hardware"] = True
+    inst = headless.pick(designer_version)
+    if core or include_hardware or designs.uses_hardware({"inventory": inventory or []}):
+        designs.require_hardware(inst)
+    out = headless.run(req, inst)
     if not include_controls:
         for c in out.get("classes", []):
             c.pop("controls", None)
@@ -126,10 +143,12 @@ def build_design(spec: dict, path: str, overwrite: bool = False, designer_versio
 
 @tool(READ_ONLY)
 def read_design(path: str, components: list[str] | None = None, sections: list[str] | None = None) -> dict:
-    """Read a saved .qsys back: core, USB, inventory, pages, every component (class, name, Script Access,
-    properties, stored values with positions, pins), wires and UCIs. Uses the Designer version that
-    saved the file. Filter with components=[names] and sections (any of properties, values, pins,
-    wires, ucis) for big designs. Works on any design, not only ones built here."""
+    """Read a saved .qsys back: core (model, name, USB type/count/mode/video bridge, settings), the design's
+    own settings (PTP, QoS, MTU...), USB slots, inventory (each item's settings and USB), pages, every
+    component (class, name, Script Access, properties, stored values with positions, pins), wires and UCIs.
+    Uses the Designer version that saved the file. Filter with components=[names] and sections (any of
+    properties, values, pins, wires, ucis, settings) for big designs. Works on any design, not only ones
+    built here."""
     d = designs.read(path)
     return designs.summarise(d, components, set(sections) if sections else None)
 

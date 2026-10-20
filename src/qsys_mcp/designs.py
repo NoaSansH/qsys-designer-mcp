@@ -19,10 +19,138 @@ NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_\-]*$")
 ENDPOINT_RE = re.compile(r"^(?P<name>.+)\.(?P<dir>in|out)\.(?P<pin>.+)$")
 # inputs that never pass signal to the block's outputs (the AEC subtracts its reference)
 NON_PASSING = {("acoustic_echo_canceler_simd", "Reference"), ("acoustic_echo_canceler", "Reference")}
+USB_TYPES = ("speakerphone", "soundcard", "none")
+USB_KEYS = {"type", "count", "mode", "video_bridge", "set", "slots"}
+CORE_KEYS = {"model", "name", "set", "usb"}
+ITEM_KEYS = {"type", "name", "set", "usb"}
+INVENTORY_REF_KEYS = {"item", "placeable", "class"}
+OLD_HELPER = ("This Designer uses the prebuilt .NET helper, which is older than the hardware settings (core.set, "
+              "core.usb, inventory usb, design). Rebuild it: dotnet publish helper-net8 -c Release -o src/qsys_mcp/helper/net8")
 
 
 class SpecError(ValueError):
     pass
+
+
+def _norm(s) -> str:
+    """Lower case, letters and digits only ('Sound Card' -> 'soundcard'), as the helper compares names."""
+    return re.sub(r"[^0-9a-z]", "", str(s).lower())
+
+
+def _check_set(where: str, values, problems: list[str]) -> None:
+    """A set block: {"Property": number, boolean, string or null}."""
+    if not isinstance(values, dict):
+        problems.append(f"{where} must be an object of property names and values")
+        return
+    for k, v in values.items():
+        if isinstance(v, (dict, list)):
+            problems.append(f"{where}.{k} must be a number, boolean or string")
+
+
+def _check_usb(where: str, usb, problems: list[str]) -> None:
+    """A usb block: {type, count, mode, video_bridge, set, slots}."""
+    if not isinstance(usb, dict):
+        problems.append(f"{where} must be an object")
+        return
+    for k in sorted(set(usb) - USB_KEYS):
+        problems.append(f"{where}: unknown key {k!r} (use {', '.join(sorted(USB_KEYS))})")
+    kind = usb.get("type")
+    if kind is not None and _norm(kind) not in USB_TYPES:
+        problems.append(f"{where}.type must be speakerphone, soundcard or none, not {kind!r}")
+    count = usb.get("count")
+    if count is not None and (isinstance(count, bool) or not isinstance(count, int) or count < 0):
+        problems.append(f"{where}.count must be a whole number, 0 or more")
+    elif count and kind is not None and _norm(kind) == "none":
+        problems.append(f"{where}: type none can't have count {count}")
+    if "mode" in usb and (isinstance(usb["mode"], bool) or not isinstance(usb["mode"], (str, int))):
+        problems.append(f"{where}.mode must be a name (e.g. WithEchoCancel) or a number")
+    if "video_bridge" in usb and not isinstance(usb["video_bridge"], bool):
+        problems.append(f"{where}.video_bridge must be true or false")
+    if "set" in usb:
+        _check_set(f"{where}.set", usb["set"], problems)
+    if "slots" in usb:
+        if not isinstance(usb["slots"], list):
+            problems.append(f"{where}.slots must be a list of objects, one per USB slot")
+        else:
+            for j, s in enumerate(usb["slots"]):
+                _check_set(f"{where}.slots[{j}]", s, problems)
+
+
+def _check_hardware(spec: dict, problems: list[str]) -> None:
+    """core.set / core.usb, inventory items' set / usb, design.set."""
+    core = spec.get("core")
+    if core is not None and not isinstance(core, dict):
+        problems.append("core must be an object")
+    elif core:
+        for k in sorted(set(core) - CORE_KEYS):
+            problems.append(f"core: unknown key {k!r} (use {', '.join(sorted(CORE_KEYS))})")
+        if "set" in core:
+            _check_set("core.set", core["set"], problems)
+        if "usb" in core:
+            _check_usb("core.usb", core["usb"], problems)
+            if spec.get("usb_sound_cards") is not None:
+                problems.append("give the Core's USB once: core.usb or usb_sound_cards, not both")
+    items = spec.get("inventory", [])
+    if not isinstance(items, list):
+        problems.append("inventory must be a list of items")
+        items = []
+    for i, inv in enumerate(items):
+        where = f"inventory[{i}]"
+        if not isinstance(inv, dict) or not isinstance(inv.get("type"), str) or not inv.get("type"):
+            problems.append(f"{where}: needs a type (see designer_versions -> inventory_types)")
+            continue
+        for k in sorted(set(inv) - ITEM_KEYS):
+            problems.append(f"{where}: unknown key {k!r} (use {', '.join(sorted(ITEM_KEYS))})")
+        if "set" in inv:
+            _check_set(f"{where}.set", inv["set"], problems)
+        if "usb" in inv:
+            _check_usb(f"{where}.usb", inv["usb"], problems)
+    design = spec.get("design")
+    if design is not None:
+        if not isinstance(design, dict):
+            problems.append('design must be an object like {"set": {...}}')
+        else:
+            for k in sorted(set(design) - {"set"}):
+                problems.append(f"design: unknown key {k!r} (only 'set')")
+            if "set" in design:
+                _check_set("design.set", design["set"], problems)
+
+
+def _check_inventory_ref(name: str, ref, problems: list[str]) -> None:
+    """A component's inventory: "Placeable Name" or {"item", "placeable", "class"}."""
+    if isinstance(ref, str):
+        return
+    if not isinstance(ref, dict):
+        problems.append(f'{name}: inventory must be a placeable name or {{"item", "placeable", "class"}}')
+        return
+    for k in sorted(set(ref) - INVENTORY_REF_KEYS):
+        problems.append(f"{name}: unknown inventory key {k!r} (use item, placeable, class)")
+    for k in sorted(INVENTORY_REF_KEYS & set(ref)):
+        if not isinstance(ref[k], str) or not ref[k]:
+            problems.append(f"{name}: inventory.{k} must be a name")
+    if not INVENTORY_REF_KEYS & set(ref):
+        problems.append(f"{name}: inventory needs an item, a placeable or a class")
+
+
+def uses_hardware(spec: dict) -> bool:
+    """Does the spec use what older helpers lack (core.set, core.usb, inventory usb, design, blocks by class)?"""
+    core = spec.get("core") if isinstance(spec.get("core"), dict) else {}
+    refs = [c.get("inventory") for c in spec.get("components", []) if isinstance(c, dict)]
+    return bool(core.get("set") or core.get("usb") or spec.get("design")
+                or any(isinstance(i, dict) and i.get("usb") for i in spec.get("inventory", []))
+                or any(isinstance(r, dict) and (r.get("class") or not r.get("placeable")) for r in refs))
+
+
+_HARDWARE_OK: set = set()
+
+
+def require_hardware(inst: headless.Install) -> None:
+    """Designer 10+ runs the prebuilt helper: check it knows the hardware settings before relying on them."""
+    if inst in _HARDWARE_OK or not headless.is_dotnet_core(inst):
+        return
+    if "hardware" not in headless.run({"command": "info"}, inst).get("features", []):
+        raise headless.HelperError(OLD_HELPER)
+    _HARDWARE_OK.add(inst)
 
 
 def validate(spec: dict, base_dir: str | Path | None = None) -> tuple[dict, list[str]]:
@@ -44,6 +172,8 @@ def validate(spec: dict, base_dir: str | Path | None = None) -> tuple[dict, list
         names.add(name)
         if bool(c.get("class")) == bool(c.get("inventory")):
             problems.append(f"{name}: give exactly one of 'class' or 'inventory'")
+        elif c.get("inventory"):
+            _check_inventory_ref(name, c["inventory"], problems)
         if c.get("page", pages[0]) not in pages:
             problems.append(f"{name}: page {c.get('page')!r} is not in spec.pages")
         if c.get("script_access", "None") not in ACCESS:
@@ -82,6 +212,7 @@ def validate(spec: dict, base_dir: str | Path | None = None) -> tuple[dict, list
             for j, e in enumerate(p.get("elements", [])):
                 if e.get("type", "control") == "control" and e.get("component") not in names:
                     problems.append(f"UCI {u.get('name')}/{p.get('name')} element {j}: no component {e.get('component')}")
+    _check_hardware(spec, problems)
     return spec, problems
 
 
@@ -96,6 +227,8 @@ def build(spec: dict, path: str, overwrite: bool = False, designer_version: str 
     if problems:
         raise SpecError("spec problems:\n- " + "\n- ".join(problems))
     inst = headless.pick(designer_version)
+    if uses_hardware(prepared):
+        require_hardware(inst)
     res = headless.run({"command": "build", "path": path, "overwrite": overwrite, "spec": prepared,
                         "positions": headless.load_positions(inst)}, inst)
     sources: dict[str, int] = {}
@@ -124,8 +257,15 @@ def read(path: str, designer_version: str | None = None) -> dict:
 
 def summarise(design: dict, components: list[str] | None = None, include: set[str] | None = None) -> dict:
     """Trim a read-back for display: optional component filter and sections."""
-    include = include or {"properties", "values", "pins", "wires", "ucis"}
-    d = {k: design[k] for k in ("path", "bytes", "designer", "saved_by", "core", "usb_slots", "inventory", "pages") if k in design}
+    include = include or {"properties", "values", "pins", "wires", "ucis", "settings"}
+    d = {k: design[k] for k in ("path", "bytes", "designer", "saved_by", "core", "design", "usb_slots", "inventory", "pages")
+         if k in design}
+    if "settings" not in include:   # hardware settings: the Core's, the design's and each inventory item's
+        d.pop("design", None)
+        if isinstance(d.get("core"), dict):
+            d["core"] = {k: v for k, v in d["core"].items() if k != "settings"}
+        if "inventory" in d:
+            d["inventory"] = [{k: v for k, v in i.items() if k != "settings"} for i in d["inventory"]]
     comps = design["components"]
     if components:
         comps = [c for c in comps if c["name"] in components]
