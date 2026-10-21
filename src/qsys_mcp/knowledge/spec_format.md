@@ -171,7 +171,7 @@ A template is a JSON file holding part of a spec (components, wires, signals, gr
 - `${NAME}` in the template is replaced by the param's value (a string that is only `${NAME}` keeps the value's type).
 - The template's blocks, banks, controllers, named controls, UCIs and signal names get the prefix; wire and signal endpoints follow, and endpoints to blocks outside the template keep their names.
 - Positions move by `dx`/`dy`; `page` puts everything on that page (added to `pages`). File paths are relative to the including spec's folder (`spec_dir`); templates can include templates.
-- A template block with `"shared": true` keeps its name and is placed once, however many times the template is included (a Core's Flex Out used by several zones): later copies only add their `values` and `control_pins` to it. A block of that name in the spec itself is used instead.
+- A template block with `"shared": true` keeps its name and is placed once, however many times the template is included (a Core's Flex Out used by several zones): later copies only add their `values` and `control_pins` to it. A block of that name in the spec itself is used instead. The templates share the Core's inputs as `FLEX_IN` and its outputs as `SPK`.
 - A template can also carry `inventory` (added once per name), `core` settings it needs (e.g. the USB bridge; the spec's own win), `zones` (prefixed with the include's prefix), and `description` / `param_help` for `list_templates`.
 
 The server comes with ready-made templates, listed with their params by `list_templates` and included by name:
@@ -186,6 +186,8 @@ The server comes with ready-made templates, listed with their params by `list_te
 | `conference_usb_dante_mic` | PC on the Core's USB speakerphone bridge, a Dante ceiling mic that cancels echo itself, mic mute and meter, 2 x 3 matrix, volume, EQ, limiter, the final speaker feed back to the mic as its AEC reference |
 | `conference_core_aec` | two Flex mics into a 2-channel AEC (reference = final speaker feed), automixer, mic mute and meter, PC on USB, 2 x 3 matrix, volume, EQ, limiter |
 | `speaker_zone` | a 3-source stereo selector, zone volume, EQ and limiter to two output channels; once per zone with a prefix |
+| `divisible_room` | two rooms and a movable wall: each room's source to its speakers, both to both with the wall open (a 2 x 2 matrix driven by a Text Controller, `WALL.WallOpen`); give `PREFIX` the include's prefix |
+| `paging_bgm` | music in two zones, ducked while the paging mic speaks; the page goes to the zones opened on `PAGE_ROUTE`; zone volume and limiter |
 
 Each builds with 0 Check Design errors and passes `audit_design`. Room-level values (EQ, Max Level, preamp gain) are left for the site.
 

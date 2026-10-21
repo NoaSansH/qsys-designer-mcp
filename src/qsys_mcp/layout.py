@@ -94,6 +94,32 @@ def _links(spec: dict) -> list[tuple[str, str]]:
     return out
 
 
+FLEX_CHANNELS = 8   # a Core's Flex In / Flex Out block: drawn with all its channels
+
+
+def _pin_counts(spec: dict) -> tuple[dict, dict]:
+    """Pins each block shows, as far as the spec tells: the highest pin number wired, or the named pins
+    wired, and all the channels of a Core's Flex block."""
+    seen = defaultdict(set)
+    for w in spec.get("wires", []) + spec.get("signals", []):
+        for e in ((w[0], w[1]) if isinstance(w, list) else (w.get("from"), w.get("to"))):
+            m = ENDPOINT_RE.match(e or "")
+            if m:
+                seen[(m["name"], m["dir"])].add(m["pin"])
+    counts = {}
+    for key, pins in seen.items():
+        numbers = [int(p) for p in pins if p.isdigit()]
+        counts[key] = max(max(numbers, default=0), len(pins))
+    ins, outs = defaultdict(int), defaultdict(int)
+    for (name, d), n in counts.items():
+        (ins if d == "in" else outs)[name] = n
+    for c in spec.get("components", []):
+        inv = c.get("inventory")
+        if isinstance(inv, str) and re.match(r"^Flex (In|Out)$", inv):
+            (ins if inv.endswith("Out") else outs)[c["name"]] = max(FLEX_CHANNELS, (ins if inv.endswith("Out") else outs)[c["name"]])
+    return ins, outs
+
+
 def _columns(names: list[str], links: list[tuple[str, str]]) -> dict[str, int]:
     """Column of each block: the longest path to it from a block nothing feeds (back edges ignored)."""
     succ = defaultdict(list)
@@ -161,10 +187,7 @@ def auto_layout(spec: dict, sizes: dict | None = None) -> dict:
                           **({"note": b["note"]} if "note" in b else {})})
     blocks = spec.get("components", []) + ctrls
     links = _links(spec)
-    ins, outs = defaultdict(int), defaultdict(int)
-    for a, b in links:
-        outs[a] += 1
-        ins[b] += 1
+    ins, outs = _pin_counts(spec)
 
     for page in pages:
         comps = [c for c in blocks if (c.get("page") or pages[0]) == page]

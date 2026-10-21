@@ -6,7 +6,7 @@ from qsys_mcp import audit, designs, headless, templates
 
 INSTALLS = headless.installs()
 NAMES = [t["name"] for t in templates.library()]
-IO = {"USB_IN", "USB_OUT", "MIC", "MICS", "SPK", "REF"}   # Core and device I/O: spare channels are expected
+IO = {"USB_IN", "USB_OUT", "MIC", "FLEX_IN", "SPK", "REF"}   # Core and device I/O: spare channels are expected
 
 
 def test_library_lists_each_template_with_its_params():
@@ -56,3 +56,21 @@ def test_template_builds_checks_and_audits(name, inst, tmp_path):
     assert all(r["pass"] for r in designs.check(d, allow_unconnected=loose_ok)["results"])
     a = audit.audit(d)
     assert a["errors"] == 0 and a["warnings"] == 0, a["findings"]
+
+
+def test_divisible_room_wall_script_follows_the_prefix():
+    from qsys_mcp import luatest
+    try:
+        luatest.find_lua()
+    except FileNotFoundError:
+        pytest.skip("no Lua interpreter")
+    spec = templates.expand({"include": [{"template": "divisible_room", "prefix": "R1_", "params": {"PREFIX": "R1_"}}]})
+    wall = next(c for c in spec["components"] if c["name"] == "R1_WALL")
+    r = luatest.run(wall["text_controller"]["lua"], wall["text_controller"]["controls"], [
+        {"expect": {"control": "State", "string": "Separated"}},
+        {"expect": {"component": "R1_ROUTE", "control": "input_1_output_2_mute", "value": True}},
+        {"set": {"control": "WallOpen", "value": True}},
+        {"expect": {"component": "R1_ROUTE", "control": "input_1_output_2_mute", "value": False}},
+        {"expect": {"component": "R1_ROUTE", "control": "input_2_output_1_mute", "value": False}},
+        {"expect": {"control": "State", "string": "Combined"}}])
+    assert r["ok"], r["failures"]

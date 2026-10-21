@@ -405,10 +405,10 @@ def preview_design(path: str, view: str = "schematic", name: str | None = None, 
     pins and signal names, wires (links made by signal name only are shown as their names), group boxes
     and notes; UCI buttons, faders, meters, knobs, LEDs, texts and group boxes. Close to Designer's
     drawing, not identical (pins are spread evenly): for checking a layout. save_to also writes the PNG."""
-    from qsys_mcp import preview
+    from qsys_mcp import layout, preview
     design = designs.read(path)
     if view == "schematic":
-        data = preview.schematic(design, name)
+        data = preview.schematic(design, name, layout.load_sizes(headless.pick(for_file=path)))
     elif view == "uci":
         data = preview.uci(design, name, page)
     else:

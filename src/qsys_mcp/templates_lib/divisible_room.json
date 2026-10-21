@@ -1,0 +1,218 @@
+{
+ "description": "Divisible room, two rooms and one movable wall: each room's program source (Flex inputs PGM_A, PGM_B) goes to its own speakers; with the wall open (WALL.WallOpen, for the panel or the control system) each room also hears the other's source. A 2 x 2 matrix does the routing, driven by a Text Controller (PREFIX must be the include's prefix, for its Lua). Room volume and limiter per room.",
+ "params": {
+  "INPUTS": "Flex In",
+  "PGM_A": 1,
+  "PGM_B": 2,
+  "OUTPUTS": "Flex Out",
+  "SPK_A": 1,
+  "SPK_B": 2,
+  "PREFIX": ""
+ },
+ "param_help": {
+  "INPUTS": "Core placeable for the sources",
+  "PGM_A": "input channel, room A source",
+  "PGM_B": "input channel, room B source",
+  "OUTPUTS": "Core placeable for the speakers",
+  "SPK_A": "output channel, room A",
+  "SPK_B": "output channel, room B",
+  "PREFIX": "the same prefix as the include (the wall's Lua names the matrix)"
+ },
+ "zones": {
+  "SOURCES": {
+   "fill": "#40D32F2F"
+  },
+  "ROUTING": {
+   "fill": "#401E88E5"
+  },
+  "ROOM A": {
+   "fill": "#40FB8C00"
+  },
+  "ROOM B": {
+   "fill": "#4043A047"
+  }
+ },
+ "components": [
+  {
+   "name": "FLEX_IN",
+   "shared": true,
+   "inventory": "${INPUTS}",
+   "zone": "SOURCES",
+   "label": "Inputs",
+   "note": "Program sources, about -20 dBFS."
+  },
+  {
+   "name": "ROUTE",
+   "class": "mixer",
+   "zone": "ROUTING",
+   "label": "Room routing\n2 x 2",
+   "script_access": "Script",
+   "properties": {
+    "n_inputs": 2,
+    "n_stereo_inputs": 0,
+    "n_outputs": 2,
+    "n_stereo_outputs": 0,
+    "input_bank_strategy": 0,
+    "output_bank_strategy": 0,
+    "crosspoint_mute": true,
+    "pan_strategy": 0,
+    "label_controls": true
+   },
+   "values": {
+    "input_1_output_1_gain": 0,
+    "input_1_output_1_mute": false,
+    "input_1_output_2_gain": 0,
+    "input_1_output_2_mute": true,
+    "input_2_output_1_gain": 0,
+    "input_2_output_1_mute": true,
+    "input_2_output_2_gain": 0,
+    "input_2_output_2_mute": false,
+    "input_1_label": "Source A",
+    "input_2_label": "Source B",
+    "output_1_label": "Room A",
+    "output_2_label": "Room B"
+   },
+   "note": "Wall closed: A -> A, B -> B.\nOpen: both to both."
+  },
+  {
+   "name": "WALL",
+   "class": "device_controller_script",
+   "zone": "ROUTING",
+   "label": "Wall",
+   "script_access": "External",
+   "text_controller": {
+    "controls": [
+     {
+      "name": "WallOpen",
+      "type": "button",
+      "button_type": "toggle"
+     },
+     {
+      "name": "State",
+      "type": "status_text"
+     }
+    ],
+    "lua": "-- Wall between room A and room B: open = each room hears both sources.\nlocal route = Component.New(\"${PREFIX}ROUTE\")\nlocal function apply()\n  local open = Controls.WallOpen.Boolean\n  route[\"input_1_output_2_mute\"].Boolean = not open\n  route[\"input_2_output_1_mute\"].Boolean = not open\n  Controls.State.String = open and \"Combined\" or \"Separated\"\nend\nControls.WallOpen.EventHandler = apply\napply()\n"
+   },
+   "note": "WallOpen from the panel or\nthe partition sensor."
+  },
+  {
+   "name": "SPK",
+   "shared": true,
+   "inventory": "${OUTPUTS}",
+   "zone": "ROOM B",
+   "label": "Speakers",
+   "values": {
+    "channel_${SPK_A}_flex_output_enable": true,
+    "channel_${SPK_B}_flex_output_enable": true
+   },
+   "note": "Set Max Level to the amps."
+  },
+  {
+   "name": "VOL_A",
+   "class": "gain",
+   "zone": "ROOM A",
+   "label": "Volume A",
+   "script_access": "External",
+   "properties": {
+    "multi_channel_type": 1,
+    "multi_channel_count": 1,
+    "max_gain": 0,
+    "min_gain": -100
+   },
+   "values": {
+    "gain": -10
+   },
+   "note": "Panel volume."
+  },
+  {
+   "name": "LIM_A",
+   "class": "limiter_peak",
+   "zone": "ROOM A",
+   "label": "Limiter A",
+   "properties": {
+    "multi_channel_type": 1,
+    "multi_channel_count": 1,
+    "b_has_sidechain": false
+   },
+   "values": {
+    "threshold_level": -3
+   },
+   "note": "-3 dBFS before the amp."
+  },
+  {
+   "name": "VOL_B",
+   "class": "gain",
+   "zone": "ROOM B",
+   "label": "Volume B",
+   "script_access": "External",
+   "properties": {
+    "multi_channel_type": 1,
+    "multi_channel_count": 1,
+    "max_gain": 0,
+    "min_gain": -100
+   },
+   "values": {
+    "gain": -10
+   },
+   "note": "Panel volume."
+  },
+  {
+   "name": "LIM_B",
+   "class": "limiter_peak",
+   "zone": "ROOM B",
+   "label": "Limiter B",
+   "properties": {
+    "multi_channel_type": 1,
+    "multi_channel_count": 1,
+    "b_has_sidechain": false
+   },
+   "values": {
+    "threshold_level": -3
+   },
+   "note": "-3 dBFS before the amp."
+  }
+ ],
+ "wires": [
+  [
+   "FLEX_IN.out.${PGM_A}",
+   "ROUTE.in.1",
+   "Source A"
+  ],
+  [
+   "FLEX_IN.out.${PGM_B}",
+   "ROUTE.in.2",
+   "Source B"
+  ],
+  [
+   "ROUTE.out.1",
+   "VOL_A.in.1",
+   "Room A mix"
+  ],
+  [
+   "ROUTE.out.2",
+   "VOL_B.in.1",
+   "Room B mix"
+  ],
+  [
+   "VOL_A.out.1",
+   "LIM_A.in.1",
+   "Room A vol"
+  ],
+  [
+   "LIM_A.out.1",
+   "SPK.in.${SPK_A}",
+   "Spk A"
+  ],
+  [
+   "VOL_B.out.1",
+   "LIM_B.in.1",
+   "Room B vol"
+  ],
+  [
+   "LIM_B.out.1",
+   "SPK.in.${SPK_B}",
+   "Spk B"
+  ]
+ ]
+}

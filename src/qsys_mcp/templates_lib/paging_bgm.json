@@ -1,0 +1,273 @@
+{
+ "description": "Background music and paging, two zones: the BGM source plays in both zones and is ducked while the paging mic speaks; the page goes to the zones selected on the page matrix (PAGE_ROUTE crosspoints 1 -> zone, muted by default). Page mic gain and mute, BGM volume, zone volume and limiter.",
+ "params": {
+  "INPUTS": "Flex In",
+  "BGM": 1,
+  "PAGE": 2,
+  "OUTPUTS": "Flex Out",
+  "Z1": 1,
+  "Z2": 2
+ },
+ "param_help": {
+  "INPUTS": "Core placeable for the sources",
+  "BGM": "input channel of the music",
+  "PAGE": "input channel of the paging mic",
+  "OUTPUTS": "Core placeable for the speakers",
+  "Z1": "output channel, zone 1",
+  "Z2": "output channel, zone 2"
+ },
+ "zones": {
+  "SOURCES": {
+   "fill": "#40D32F2F"
+  },
+  "PAGING": {
+   "fill": "#408E24AA"
+  },
+  "ZONES": {
+   "fill": "#40FB8C00"
+  }
+ },
+ "components": [
+  {
+   "name": "FLEX_IN",
+   "shared": true,
+   "inventory": "${INPUTS}",
+   "zone": "SOURCES",
+   "label": "Inputs",
+   "note": "Music and paging mic."
+  },
+  {
+   "name": "BGM_VOL",
+   "class": "gain",
+   "zone": "SOURCES",
+   "label": "Music level",
+   "script_access": "External",
+   "properties": {
+    "multi_channel_type": 1,
+    "multi_channel_count": 1,
+    "max_gain": 0,
+    "min_gain": -100
+   },
+   "values": {
+    "gain": -12
+   }
+  },
+  {
+   "name": "PAGE_MIC",
+   "class": "gain",
+   "zone": "PAGING",
+   "label": "Page mic",
+   "script_access": "External",
+   "properties": {
+    "multi_channel_type": 1,
+    "multi_channel_count": 1,
+    "max_gain": 0,
+    "min_gain": -100
+   },
+   "values": {
+    "gain": 0,
+    "mute": false
+   },
+   "note": "Page level and mute."
+  },
+  {
+   "name": "DUCK",
+   "class": "priority_ducker",
+   "zone": "PAGING",
+   "label": "Ducker",
+   "properties": {
+    "n_channels": 2
+   },
+   "values": {
+    "threshold_level": -40,
+    "depth": 20
+   },
+   "note": "Music down 20 dB\nwhile the page speaks."
+  },
+  {
+   "name": "PAGE_ROUTE",
+   "class": "mixer",
+   "zone": "PAGING",
+   "label": "Page zones\n3 x 2",
+   "script_access": "External",
+   "properties": {
+    "n_inputs": 3,
+    "n_stereo_inputs": 0,
+    "n_outputs": 2,
+    "n_stereo_outputs": 0,
+    "input_bank_strategy": 0,
+    "output_bank_strategy": 0,
+    "crosspoint_mute": true,
+    "pan_strategy": 0,
+    "label_controls": true
+   },
+   "values": {
+    "input_1_output_1_gain": 0,
+    "input_1_output_1_mute": true,
+    "input_1_output_2_gain": 0,
+    "input_1_output_2_mute": true,
+    "input_2_output_1_gain": 0,
+    "input_2_output_1_mute": false,
+    "input_2_output_2_gain": 0,
+    "input_2_output_2_mute": true,
+    "input_3_output_1_gain": 0,
+    "input_3_output_1_mute": true,
+    "input_3_output_2_gain": 0,
+    "input_3_output_2_mute": false,
+    "input_1_label": "Page",
+    "input_2_label": "Music 1",
+    "input_3_label": "Music 2",
+    "output_1_label": "Zone 1",
+    "output_2_label": "Zone 2"
+   },
+   "note": "input_1_output_N_mute off\n= page into zone N."
+  },
+  {
+   "name": "SPK",
+   "shared": true,
+   "inventory": "${OUTPUTS}",
+   "zone": "ZONES",
+   "label": "Speakers",
+   "values": {
+    "channel_${Z1}_flex_output_enable": true,
+    "channel_${Z2}_flex_output_enable": true
+   }
+  },
+  {
+   "name": "VOL_Z1",
+   "class": "gain",
+   "zone": "ZONES",
+   "label": "Volume Z1",
+   "script_access": "External",
+   "properties": {
+    "multi_channel_type": 1,
+    "multi_channel_count": 1,
+    "max_gain": 0,
+    "min_gain": -100
+   },
+   "values": {
+    "gain": -10
+   },
+   "note": "Panel volume."
+  },
+  {
+   "name": "LIM_Z1",
+   "class": "limiter_peak",
+   "zone": "ZONES",
+   "label": "Limiter Z1",
+   "properties": {
+    "multi_channel_type": 1,
+    "multi_channel_count": 1,
+    "b_has_sidechain": false
+   },
+   "values": {
+    "threshold_level": -3
+   },
+   "note": "-3 dBFS before the amp."
+  },
+  {
+   "name": "VOL_Z2",
+   "class": "gain",
+   "zone": "ZONES",
+   "label": "Volume Z2",
+   "script_access": "External",
+   "properties": {
+    "multi_channel_type": 1,
+    "multi_channel_count": 1,
+    "max_gain": 0,
+    "min_gain": -100
+   },
+   "values": {
+    "gain": -10
+   },
+   "note": "Panel volume."
+  },
+  {
+   "name": "LIM_Z2",
+   "class": "limiter_peak",
+   "zone": "ZONES",
+   "label": "Limiter Z2",
+   "properties": {
+    "multi_channel_type": 1,
+    "multi_channel_count": 1,
+    "b_has_sidechain": false
+   },
+   "values": {
+    "threshold_level": -3
+   },
+   "note": "-3 dBFS before the amp."
+  }
+ ],
+ "wires": [
+  [
+   "FLEX_IN.out.${BGM}",
+   "BGM_VOL.in.1",
+   "Music in"
+  ],
+  [
+   "BGM_VOL.out.1",
+   "DUCK.in.1",
+   "Music"
+  ],
+  [
+   "BGM_VOL.out.1",
+   "DUCK.in.2",
+   "Music"
+  ],
+  [
+   "FLEX_IN.out.${PAGE}",
+   "PAGE_MIC.in.1",
+   "Page mic"
+  ],
+  [
+   "PAGE_MIC.out.1",
+   "DUCK.in.Priority",
+   "Page"
+  ],
+  [
+   "PAGE_MIC.out.1",
+   "PAGE_ROUTE.in.1",
+   "Page"
+  ],
+  [
+   "DUCK.out.1",
+   "PAGE_ROUTE.in.2",
+   "Music z1"
+  ],
+  [
+   "DUCK.out.2",
+   "PAGE_ROUTE.in.3",
+   "Music z2"
+  ],
+  [
+   "PAGE_ROUTE.out.1",
+   "VOL_Z1.in.1",
+   "Zone 1"
+  ],
+  [
+   "PAGE_ROUTE.out.2",
+   "VOL_Z2.in.1",
+   "Zone 2"
+  ],
+  [
+   "VOL_Z1.out.1",
+   "LIM_Z1.in.1",
+   "Room Z1 vol"
+  ],
+  [
+   "LIM_Z1.out.1",
+   "SPK.in.${Z1}",
+   "Spk Z1"
+  ],
+  [
+   "VOL_Z2.out.1",
+   "LIM_Z2.in.1",
+   "Room Z2 vol"
+  ],
+  [
+   "LIM_Z2.out.1",
+   "SPK.in.${Z2}",
+   "Spk Z2"
+  ]
+ ]
+}

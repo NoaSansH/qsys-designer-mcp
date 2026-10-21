@@ -84,15 +84,26 @@ def _kind(c: dict) -> str:
     return "io" if any(h in cls for h in IO_HINTS) else "dsp"
 
 
-def schematic(design: dict, page: str | None = None) -> bytes:
-    """PNG of one schematic page (default: the first)."""
+UNDRAWN = (80.0, 80.0)   # the size a block keeps until Designer has drawn it
+
+
+def schematic(design: dict, page: str | None = None, sizes: dict | None = None) -> bytes:
+    """PNG of one schematic page (default: the first). sizes: block sizes learned from Designer
+    (layout.load_sizes), for blocks Designer hasn't drawn yet."""
+    from qsys_mcp import layout
     page = page or design["pages"][0]
     if page not in design["pages"]:
         raise ValueError(f"no page {page!r}; pages: {design['pages']}")
     comps = [dict(c) for c in design["components"] if c.get("page") == page]
-    for c in comps:   # room for every pin row, as Designer draws them
-        rows = max([sum(p["dir"] == d for p in c.get("pins", [])) for d in ("in", "out")] + [0])
-        c["h"] = max(c.get("h") or 40, 14 + 10.5 * rows)
+    for c in comps:
+        signal = [p for p in c.get("pins", []) if not p.get("control")]
+        ins, outs = (sum(p["dir"] == d for p in signal) for d in ("in", "out"))
+        if (c.get("w"), c.get("h")) == UNDRAWN:
+            c["w"], c["h"] = layout.estimate({"name": c["name"], "label": c.get("user_label") or c["name"], "class": c["class"],
+                                              "_ins": ins, "_outs": outs}, sizes or {})
+        c["h"] = max(c["h"], 8 + 9 * max(ins, outs, 0))          # room for every pin row
+        c["_body"] = c["h"]
+        c["h"] += layout.ROW * sum(1 for p in c.get("pins", []) if p.get("control"))   # control pins listed under it
     graphics = [g for g in design.get("graphics", []) if g.get("page") == page]
     boxes = [(c["x"], c["y"], c["x"] + c.get("w", 80), c["y"] + c.get("h", 40)) for c in comps] + \
             [(g["x"], g["y"], g["x"] + g["w"], g["y"] + g["h"]) for g in graphics]
@@ -135,10 +146,15 @@ def schematic(design: dict, page: str | None = None) -> bytes:
         x1, y1 = P(c["x"] + c.get("w", 80), c["y"] + c.get("h", 40))
         d.rounded_rectangle((x0, y0, x1, y1), radius=3 * s, fill=BLOCK[_kind(c)], outline=(230, 230, 230), width=max(1, round(s)))
         _text(d, (x0, y0, x1, y1), c.get("user_label") or c["name"], _font(10 * s, True), (240, 240, 240))
+        body = y0 + c["_body"] * s
+        if body < y1 - 1:
+            d.line([(x0, body), (x1, body)], fill=(230, 230, 230), width=1)
+        controls = [p for p in c.get("pins", []) if p.get("control")]
         for side in ("in", "out"):
-            ps = [p for p in c.get("pins", []) if p["dir"] == side]
-            for i, p in enumerate(ps):
-                py = y0 + (y1 - y0) * (i + 0.5) / len(ps)
+            ps = [p for p in c.get("pins", []) if p["dir"] == side and not p.get("control")]
+            spots = [(p, y0 + (body - y0) * (i + 0.5) / len(ps)) for i, p in enumerate(ps)]
+            spots += [(p, body + (i + 0.5) * layout.ROW * s) for i, p in enumerate(controls) if p["dir"] == side]
+            for p, py in spots:
                 px = x0 if side == "in" else x1
                 pins[f"{c['name']}.{side}.{p['index']}"] = (px, py)
                 r = 2.5 * s

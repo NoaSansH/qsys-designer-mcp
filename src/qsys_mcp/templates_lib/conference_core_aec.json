@@ -47,7 +47,7 @@
  },
  "components": [
   {
-   "name": "MICS",
+   "name": "FLEX_IN",
    "shared": true,
    "inventory": "${INPUTS}",
    "zone": "INPUTS",
@@ -244,12 +244,12 @@
  ],
  "wires": [
   [
-   "MICS.out.${MIC_1}",
+   "FLEX_IN.out.${MIC_1}",
    "AEC.in.1",
    "Mic 1"
   ],
   [
-   "MICS.out.${MIC_2}",
+   "FLEX_IN.out.${MIC_2}",
    "AEC.in.2",
    "Mic 2"
   ],
