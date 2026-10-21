@@ -86,7 +86,14 @@ static class Q
     public static object TryGet(object o, string p) { try { var pi = o.GetType().GetProperty(p, All); return pi == null ? null : pi.GetValue(o, null); } catch { return null; } }
     public static void Set(object o, string p, object v) { o.GetType().GetProperty(p, All).SetValue(o, v, null); }
     public static object F(object o, string f) { return o.GetType().GetField(f, All).GetValue(o); }
-    public static object TryF(object o, string f) { var fi = o.GetType().GetField(f, All); return fi == null ? null : fi.GetValue(o); }
+    // a field, or a property of that name (Designer 10 turned some fields into properties)
+    public static object TryF(object o, string f)
+    {
+        var fi = o.GetType().GetField(f, All);
+        if (fi != null) return fi.GetValue(o);
+        var pi = o.GetType().GetProperty(f, All);
+        return pi == null || pi.GetIndexParameters().Length > 0 ? null : pi.GetValue(o, null);
+    }
     public static object Call(object o, string m, params object[] a)
     {
         var t = o as Type ?? o.GetType();
@@ -152,10 +159,27 @@ static class Q
     public static void SetProp(object comp, string codeName, object value)
     {
         var cur = GetProp(comp, codeName);
-        object v = value;
-        if (cur != null && value != null && cur.GetType() != value.GetType()) v = Convert.ChangeType(value, cur.GetType());
+        object v = ChoiceValue(comp, codeName, value);
+        if (cur != null && v != null && cur.GetType() != v.GetType()) v = Convert.ChangeType(v, cur.GetType());
         Helper.GetMethods(All).First(m => m.Name == "UpdateComponentProperty" && !m.IsGenericMethod &&
             m.GetParameters()[0].ParameterType.Name == "Component").Invoke(null, new[] { comp, codeName, v });
+    }
+
+    // a list property also takes the choice's name, e.g. output_choice "Mix Only" for 1
+    static object ChoiceValue(object comp, string codeName, object value)
+    {
+        var s = value as string;
+        var get = Helper.GetMethods(All).FirstOrDefault(m => m.Name == "GetComponentProperties" && m.GetParameters().Length == 1);
+        if (s == null || get == null) return value;
+        foreach (var d in (IEnumerable)get.Invoke(null, new[] { comp }))
+        {
+            if (Convert.ToString(TryF(d, "CodeName")) != codeName) continue;
+            var choices = TryF(d, "Choices") as IEnumerable;
+            if (choices == null) break;
+            foreach (var ch in choices)
+                if (string.Equals(Convert.ToString(TryF(ch, "PrettyName")), s, StringComparison.OrdinalIgnoreCase)) return TryF(ch, "Value");
+        }
+        return value;
     }
 
     public static void Refresh(object comp) { Helper.GetMethod("UpdateComponent", All).Invoke(null, new[] { comp }); }

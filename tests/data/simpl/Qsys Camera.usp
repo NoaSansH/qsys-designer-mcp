@@ -1,0 +1,4 @@
+Digital_Input TiltUp, _skip_, PrivacyOn;
+Digital_Output _skip_, PrivacyIsOn;
+// a comment, ignored
+String_Parameter CoreID[100], ComponentName[100];

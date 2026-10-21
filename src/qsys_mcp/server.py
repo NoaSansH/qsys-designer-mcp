@@ -149,6 +149,16 @@ def edit_design(path: str, ops: list[dict], out_path: str | None = None, spec_di
 
 
 @tool(READ_ONLY)
+def list_templates() -> list[dict]:
+    """The ready-made spec fragments that come with the server (conference room with a USB PC and a Dante
+    mic, conference room with the AEC in the Core, speaker zone...): name, what it builds, its params with
+    defaults and meaning, its zones and blocks. Use one in a spec with
+    "include": [{"template": "speaker_zone", "prefix": "Z1_", "params": {"SPK_L": 3}}]."""
+    from qsys_mcp import templates
+    return templates.library()
+
+
+@tool(READ_ONLY)
 def check_contract(path: str, contract: dict) -> dict:
     """Check that a design offers what a control system or script expects: each block by code name,
     with the Script Access it needs, and the controls it reads or writes, e.g.
@@ -158,6 +168,36 @@ def check_contract(path: str, contract: dict) -> dict:
     that the contract doesn't mention."""
     from qsys_mcp import contract as contract_mod
     return contract_mod.check(path, contract)
+
+
+@tool(READ_ONLY)
+def check_simpl(design_path: str, smw_path: str, usp_dirs: list[str] | None = None, modules: dict | None = None) -> dict:
+    """Check a design against what a Crestron SIMPL program (.smw) expects of it: the program's Q-SYS
+    modules (QscQsys library: Fader, Meter, Camera, Snapshot Controller, Generic Boolean/Integer/String
+    Component Control) give the blocks it addresses by code name and the controls it uses (for a camera,
+    only the inputs and outputs wired in the program). The modules' .usp files are looked for next to the
+    .smw and in usp_dirs. modules describes other modules: {"my module": {"controls": [...],
+    "control_param": "...", "inputs": {"Pin": "control"}, "outputs": {...}, "writes": [...]}}."""
+    from qsys_mcp import contract as contract_mod, simpl
+    c = simpl.contract(smw_path, usp_dirs, modules)
+    r = contract_mod.check(design_path, c)
+    r["program_modules"] = c["modules"]
+    r["not_checked"] = c["not_checked"]
+    return r
+
+
+@tool(APP_SAFE)
+async def audit_design(path: str, roles: dict | None = None, with_snapshots: bool = False, discard_changes: bool = False) -> dict:
+    """Review a design for the mistakes that make a room unusable: a microphone reaching the loudspeakers
+    (feedback), a PC getting its own audio back (echo, loop), an AEC reference not taken after the room
+    volume, blocks with no connection, limiter thresholds above 0 dBFS, high stored gains, blocks open to
+    QRC. Paths follow the wiring through each block in its state: muted or -100 dB crosspoints and muted
+    gains stop them. with_snapshots also checks every saved snapshot (emulates a test copy). roles, when
+    the inferred ones aren't right: {"mics": [...], "speakers": [...], "pc_links": [[in, out]],
+    "aec_reference": "BLOCK.in.N", "volume": "BLOCK"} (blocks or pins)."""
+    from qsys_mcp import audit
+    values = await runtime.snapshot_contents(designer, emulator, path, discard_changes) if with_snapshots else None
+    return audit.audit(designs.read(path), roles, values)
 
 
 @tool(READ_ONLY)

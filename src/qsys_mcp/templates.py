@@ -7,6 +7,10 @@ A template is a JSON file with any of components, wires, signals, graphics, snap
 named_controls and ucis, plus optional "params" defaults. In it, "${NAME}" is replaced by the param's
 value; every block, bank, controller and named control gets the prefix, wire and signal endpoints and
 signal names follow, and positions move by dx/dy. Paths are relative to the including spec's folder.
+
+A component marked "shared": true keeps its name and is placed once however many times the template is
+included (a Core's Flex Out, a device): later copies only add their values and control pins to it.
+{"template": "speaker_zone"} takes one of the templates that come with the server (see library()).
 """
 
 from __future__ import annotations
@@ -19,7 +23,19 @@ from pathlib import Path
 from qsys_mcp.designs import ENDPOINT_RE, SpecError
 
 PARAM_RE = re.compile(r"\$\{(\w+)\}")
-MERGED = ("components", "wires", "signals", "graphics", "snapshot_banks", "named_controls", "ucis")
+MERGED = ("components", "wires", "signals", "graphics", "snapshot_banks", "named_controls", "ucis", "inventory")
+LIBRARY = Path(__file__).parent / "templates_lib"
+
+
+def library() -> list[dict]:
+    """The templates that come with the server: name, description, params and their defaults."""
+    out = []
+    for f in sorted(LIBRARY.glob("*.json")):
+        t = json.loads(f.read_text(encoding="utf-8"))
+        out.append({"name": f.stem, "description": t.get("description", ""), "params": t.get("params", {}),
+                    "param_help": t.get("param_help", {}), "zones": t.get("zones", {}),
+                    "components": [c["name"] for c in t.get("components", [])]})
+    return out
 
 
 def _subst(v, params: dict, where: str):
@@ -33,8 +49,8 @@ def _subst(v, params: dict, where: str):
         return params[whole.group(1)] if whole and whole.group(1) in params else PARAM_RE.sub(one, v)
     if isinstance(v, list):
         return [_subst(x, params, where) for x in v]
-    if isinstance(v, dict):
-        return {k: _subst(x, params, where) for k, x in v.items()}
+    if isinstance(v, dict):   # keys too: "channel_${CH}_mute"
+        return {_subst(k, params, where): _subst(x, params, where) for k, x in v.items()}
     return v
 
 
@@ -53,17 +69,24 @@ def expand(spec: dict, base_dir: str | Path | None = None, _depth: int = 0) -> d
     base = Path(base_dir) if base_dir else Path.cwd()
     for i, inc in enumerate(spec.pop("include")):
         where = f"include[{i}]"
-        f = Path(inc["file"])
-        f = f if f.is_absolute() else base / f
+        if "template" in inc:   # one of the server's own templates, by name
+            f = LIBRARY / (inc["template"] + ".json")
+            if not f.is_file():
+                raise SpecError(f"{where}: no template {inc['template']!r}; templates: {[t['name'] for t in library()]}")
+        else:
+            f = Path(inc["file"])
+            f = f if f.is_absolute() else base / f
         try:
             tpl = json.loads(f.read_text(encoding="utf-8"))
         except OSError as e:
             raise SpecError(f"{where}: cannot read {f}: {e}") from e
         tpl = expand(tpl, f.parent, _depth + 1)
         params = {**tpl.pop("params", {}), **inc.get("params", {})}
+        for k in ("description", "param_help"):
+            tpl.pop(k, None)
         tpl = _subst(tpl, params, f"{where} ({f.name})")
         prefix, dx, dy, page = inc.get("prefix", ""), inc.get("dx", 0), inc.get("dy", 0), inc.get("page")
-        names = {c["name"] for c in tpl.get("components", [])}
+        names = {c["name"] for c in tpl.get("components", []) if not c.get("shared")}
         for b in tpl.get("snapshot_banks", []):
             if b.get("controller"):
                 names.add(b["controller"].get("name", b["name"]))
@@ -76,9 +99,21 @@ def expand(spec: dict, base_dir: str | Path | None = None, _depth: int = 0) -> d
             if page and "page" not in o:
                 o["page"] = page
 
+        existing = {c["name"]: c for c in spec.get("components", [])}
+        kept = []
         for c in tpl.get("components", []):
-            c["name"] = prefix + c["name"]
+            if c.pop("shared", False):
+                if c["name"] in existing:      # already placed: add this copy's settings to it
+                    first = existing[c["name"]]
+                    first["values"] = {**c.get("values", {}), **first.get("values", {})}
+                    pins = first.setdefault("control_pins", [])
+                    pins.extend(x for x in c.get("control_pins", []) if x not in pins)
+                    continue
+            else:
+                c["name"] = prefix + c["name"]
             move(c)
+            kept.append(c)
+        tpl["components"] = kept
         for key in ("wires", "signals"):
             out = []
             for w in tpl.get(key, []):
@@ -109,8 +144,17 @@ def expand(spec: dict, base_dir: str | Path | None = None, _depth: int = 0) -> d
                 for e in p.get("elements", []):
                     if e.get("component") in names:
                         e["component"] = prefix + e["component"]
+        known = {i.get("name") for i in spec.get("inventory", [])}
+        tpl["inventory"] = [i for i in tpl.get("inventory", []) if i.get("name") not in known]   # shared devices once
         for key in MERGED:
             spec.setdefault(key, []).extend(tpl.get(key, []))
+        for k, v in tpl.get("core", {}).items():          # Core settings the template needs, unless the spec sets them
+            spec.setdefault("core", {}).setdefault(k, v)
+        for z, style in tpl.get("zones", {}).items():
+            spec.setdefault("zones", {}).setdefault(prefix + z if prefix else z, style)
+        for c in tpl.get("components", []):
+            if c.get("zone") and prefix:
+                c["zone"] = prefix + c["zone"]
         if page and page not in spec.setdefault("pages", spec.get("pages") or ["Main"]):
             spec["pages"].append(page)
     return spec

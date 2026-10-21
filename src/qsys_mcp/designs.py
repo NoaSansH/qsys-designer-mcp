@@ -37,6 +37,7 @@ def validate(spec: dict, base_dir: str | Path | None = None) -> tuple[dict, list
     pages = spec.get("pages") or ["Main"]
     spec["pages"] = pages
     names: set[str] = set()
+    placed: dict[str, str] = {}
     for i, c in enumerate(spec.get("components", [])):
         where = f"components[{i}]"
         name = c.get("name")
@@ -48,6 +49,13 @@ def validate(spec: dict, base_dir: str | Path | None = None) -> tuple[dict, list
         kinds = [k for k in ("class", "inventory", "plugin", "plugin_file") if c.get(k)]
         if len(kinds) != 1 and set(kinds) != {"plugin", "plugin_file"}:
             problems.append(f"{name}: give exactly one of 'class', 'inventory' or 'plugin'")
+        inv = c.get("inventory")
+        if inv:
+            key = f"{inv.get('item', '')}/{inv.get('placeable', '')}" if isinstance(inv, dict) else str(inv)
+            if key in placed:
+                problems.append(f"{name}: {key} is already placed as {placed[key]}; a Core or device block goes "
+                                f"on the schematic once (wire both to it, or mark it \"shared\" in a template)")
+            placed[key] = name
         if not isinstance(c.get("control_pins", []), list):
             problems.append(f"{name}: control_pins must be a list of control ids")
         if c.get("page", pages[0]) not in pages:
