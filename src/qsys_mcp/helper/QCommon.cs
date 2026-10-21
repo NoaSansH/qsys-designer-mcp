@@ -78,7 +78,24 @@ static class Q
         var load = fio.GetMethods(All).First(m => m.Name == "Load" && m.GetParameters()[0].ParameterType == typeof(string));
         var doc = load.Invoke(null, new object[] { path, null });
         Call(fio, "InitRoot", doc, path, false);
+        RegisterPlugins(doc);
         return doc;
+    }
+
+    // A loaded design's plugin blocks only offer their controls once Designer knows their class. The
+    // design carries each plugin's code (plugin_source), so the class is registered from it.
+    static void RegisterPlugins(object doc)
+    {
+        var add = T("QSC.QSys.Design.Plugins.Manager").GetMethods(All).First(m => m.Name == "AddPlugin");
+        foreach (var page in L(Get(doc, "Pages")))
+            foreach (var el in L(Get(page, "AllChildren")))
+            {
+                var cls = Convert.ToString(TryGet(el, "ClassName"));
+                if (!cls.StartsWith("%PLUGIN%")) continue;
+                var source = Convert.ToString(GetProp(el, "plugin_source"));
+                if (string.IsNullOrEmpty(source)) continue;
+                try { add.Invoke(null, new object[] { cls, source, null }); } catch { }
+            }
     }
 
     // ---- components -------------------------------------------------------------

@@ -124,12 +124,27 @@ def build_design(spec: dict, path: str, overwrite: bool = False, designer_versio
     return designs.build(spec, path, overwrite, designer_version, spec_dir)
 
 
+@tool(WRITES_FILE)
+def edit_design(path: str, ops: list[dict], out_path: str | None = None, spec_dir: str | None = None) -> dict:
+    """Change a saved design without rebuilding it: everything the operations don't touch is kept,
+    snapshot contents, UCIs and positions included. ops run in order, e.g.
+    [{"op": "set_value", "component": "MIC", "control": "IPAddress", "value": "10.0.0.20"},
+     {"op": "move", "component": "MIX", "x": 400, "y": 60},
+     {"op": "add_wire", "from": "A.out.1", "to": "B.in.1", "signal": "Program L"},
+     {"op": "remove_component", "component": "OLD_GAIN"}].
+    All ops: see qsys://spec-format, "Editing a design". Writes `path` in place unless out_path (a new
+    file) is given; edit in place only when the user asked for that file to change."""
+    return designs.edit(path, ops, out_path, spec_dir)
+
+
 @tool(READ_ONLY)
 def read_design(path: str, components: list[str] | None = None, sections: list[str] | None = None) -> dict:
     """Read a saved .qsys back: core, USB, inventory, pages, every component (class, name, Script Access,
-    properties, stored values with positions, pins), wires and UCIs. Uses the Designer version that
-    saved the file. Filter with components=[names] and sections (any of properties, values, pins,
-    wires, ucis) for big designs. Works on any design, not only ones built here."""
+    properties, stored values with positions, pins and their signal names), wires, UCIs, schematic
+    notes and group boxes, and snapshot banks (contents, controller, which snapshots hold data). Uses
+    the Designer version that saved the file. Filter with components=[names] and sections (any of
+    properties, values, pins, wires, ucis, graphics) for big designs. Works on any design, not only
+    ones built here."""
     d = designs.read(path)
     return designs.summarise(d, components, set(sections) if sections else None)
 
@@ -194,6 +209,34 @@ async def calibrate_values(path: str, discard_changes: bool = False) -> dict:
     return await runtime.calibrate(designer, qrc, path, discard_changes)
 
 
+@tool(WRITES_FILE)
+async def record_snapshots(path: str, snapshots: dict, discard_changes: bool = False) -> dict:
+    """Fill the snapshot banks of a design (built with spec.snapshot_banks). Snapshot contents are written
+    by the engine, so this emulates a test copy, sets the controls of each snapshot over QRC, presses the
+    bank's Save button, saves the copy and copies the banks' saved data into `path`. snapshots:
+    {"BANK": {"controller": "CODE_NAME", "snapshots": {"1": [{"component", "control", "value"}], ...}}}.
+    Only the listed banks change in `path`; closes any running Designer first."""
+    return await runtime.record_snapshots(designer, qrc, path, snapshots, discard_changes)
+
+
+@tool(APP)
+async def run_scenario(path: str, steps: list[dict], discard_changes: bool = False, keep_running: bool = False) -> dict:
+    """Test a design's logic in emulation with a scripted scenario, on a test copy (the file isn't
+    changed). Steps run in order, each with one action:
+    {"set": {"component", "control", "value"}}, {"load": {"controller", "snapshot": 3}}, {"wait": 1.5},
+    {"expect": {"component", "control", "value" or "string", "tolerance"?}}, plus an optional "label".
+    Returns every expectation with what the engine had, and stops emulating unless keep_running.
+    Emulation has no audio: it tests control state, not sound."""
+    return await runtime.run_scenario(designer, qrc, path, steps, discard_changes, keep_running)
+
+
+@tool(APP_SAFE)
+async def learn_block_sizes(path: str, discard_changes: bool = False) -> dict:
+    """Let Designer draw a design once (on a test copy) and remember the real size of each kind of
+    block, so automatic layout (spec "layout") spaces blocks exactly. Closes any running Designer first."""
+    return await runtime.learn_block_sizes(designer, path, discard_changes)
+
+
 @tool(READ_ONLY)
 def list_dialogs() -> list[dict]:
     """Dialogs Designer has open (title, text, buttons), e.g. after emulate_design."""
@@ -208,9 +251,29 @@ def dialog_button(button: str) -> str:
 
 
 @tool(READ_ONLY, image=True)
-def screenshot() -> Image:
-    """Picture of the Designer window (brought to the front). The image is sent to the model."""
-    return Image(data=designer.screenshot(), format="png")
+def screenshot(view: str | None = None, name: str | None = None, page: str | None = None,
+               save_to: str | None = None) -> Image:
+    """Picture of the Designer window (brought to the front). The image is sent to the model.
+    view='schematic' (name = page title) or view='uci' (name = UCI, optional page) first opens that
+    page fitted to the window; this clicks Designer's Design Elements panel, which has no UI Automation.
+    save_to also writes the PNG to that path."""
+    if view:
+        designer.show_view(view, name or "", page)
+    data = designer.screenshot()
+    if save_to:
+        with open(save_to, "wb") as fh:
+            fh.write(data)
+    return Image(data=data, format="png")
+
+
+@tool(APP_SAFE)
+def designer_check(path: str | None = None, discard_changes: bool = False) -> dict:
+    """Run Designer's own File > Check Design on the open design (or open `path` first) and report
+    errors, warnings and the licences the design needs; passed is true when no error was reported.
+    Complements check_design, which checks the saved file statically."""
+    if path:
+        designer.open_design(path, discard_changes)
+    return designer.check_design()
 
 
 # ---- Lua -----------------------------------------------------------------------------------

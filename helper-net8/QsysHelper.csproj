@@ -24,7 +24,9 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../src/qsys_mcp/helper/QCommon.cs" />
+    <Compile Include="../src/qsys_mcp/helper/QUci.cs" />
     <Compile Include="../src/qsys_mcp/helper/QsysHelper.cs" />
+    <Compile Include="../src/qsys_mcp/helper/QsysHelper.Edit.cs" />
   </ItemGroup>
   <ItemGroup>
     <!-- compile-time only: at run time Designer's own copy is used, so its JSON attributes apply -->

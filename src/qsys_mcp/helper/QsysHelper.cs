@@ -4,7 +4,7 @@
 //
 //   qhelper.exe <designer-dir> <request.json> <response.json>
 //
-// Commands (request "command"): info, probe, build, read, set_values, copy.
+// Commands (request "command"): info, probe, build, read, edit, set_values, copy, copy_snapshots.
 // Uses Designer internals that are not a public API; see the README's licensing note.
 using System;
 using System.Collections;
@@ -14,7 +14,7 @@ using System.Linq;
 using System.Reflection;
 using Newtonsoft.Json.Linq;
 
-static class QsysHelper
+static partial class QsysHelper
 {
     // Main must not touch Newtonsoft types: they load from the Designer folder, and the resolver
     // for that folder is only installed by Q.Init. The JSON work happens in Run().
@@ -64,6 +64,8 @@ static class QsysHelper
             case "read": return Read((string)req["path"]);
             case "set_values": return SetValues(req);
             case "copy": return Copy(req);
+            case "copy_snapshots": return CopySnapshots(req);
+            case "edit": return Edit(req);
             default: throw new Exception("unknown command " + req["command"]);
         }
     }
@@ -102,11 +104,19 @@ static class QsysHelper
 
     static string DesignerVersion() { return Q.Asm.GetName().Version.ToString(); }
 
+    // Schematic blocks, including subclasses such as Snapshot Controllers (Snapshot.PlacedComponent).
+    static bool IsComponent(object el)
+    {
+        for (var t = el.GetType(); t != null; t = t.BaseType)
+            if (t.FullName == "QSC.QSys.Design.Component") return true;
+        return false;
+    }
+
     static List<object> AllComponents(object doc)
     {
         var list = new List<object>();
         foreach (var page in Q.L(Q.Get(doc, "Pages")))
-            list.AddRange(Q.L(Q.Get(page, "AllChildren")).Where(k => k.GetType().Name == "Component"));
+            list.AddRange(Q.L(Q.Get(page, "AllChildren")).Where(IsComponent));
         return list;
     }
 
@@ -153,7 +163,12 @@ static class QsysHelper
         {
             int i = 0;
             foreach (var p in Q.Pins(comp, dir))
-                arr.Add(new JObject { { "dir", dir == "Input" ? "in" : "out" }, { "index", ++i }, { "name", Q.PinName(p) } });
+            {
+                var o = new JObject { { "dir", dir == "Input" ? "in" : "out" }, { "index", ++i }, { "name", Q.PinName(p) } };
+                var signal = Convert.ToString(Q.Get(p, "Label"));
+                if (!string.IsNullOrEmpty(signal)) o["signal"] = signal;
+                arr.Add(o);
+            }
         }
         return arr;
     }
@@ -186,7 +201,13 @@ static class QsysHelper
         try { types = Q.Asm.GetTypes(); } catch (ReflectionTypeLoadException e) { types = e.Types.Where(x => x != null).ToArray(); }
         var baseT = Q.T("QSC.QSys.Design.Inventory.Base");
         return types.Where(t => t.Namespace == "QSC.QSys.Design.Inventory" && !t.IsAbstract && baseT.IsAssignableFrom(t)
-            && t.GetConstructor(Type.EmptyTypes) != null).OrderBy(t => t.Name);
+            && (t.GetConstructor(Type.EmptyTypes) != null || ModelConstructor(t) != null)).OrderBy(t => t.Name);
+    }
+
+    // Items such as cameras are built from a model enum (new OnVifCamera(OnVifCameraModel)).
+    static ConstructorInfo ModelConstructor(Type t)
+    {
+        return t.GetConstructors().FirstOrDefault(c => c.GetParameters().Length == 1 && c.GetParameters()[0].ParameterType.IsEnum);
     }
 
     static JObject Probe(JObject req)
@@ -242,6 +263,7 @@ static class QsysHelper
                 Q.Refresh(c);
                 o["label"] = (string)Q.Get(c, "Label");
                 o["properties"] = Props(c);
+                o["property_choices"] = PropertyChoices(c);
                 o["pins"] = PinInfo(c);
                 o["controls"] = ControlInfo(c);
             }
@@ -249,6 +271,24 @@ static class QsysHelper
             classes.Add(o);
         }
         res["classes"] = classes;
+        return res;
+    }
+
+    // For list properties: what each value means, e.g. bandwidth_q_factor: 0 Bandwidth, 1 Q-Factor.
+    static JObject PropertyChoices(object comp)
+    {
+        var res = new JObject();
+        var descs = (IEnumerable)Q.Helper.GetMethods(Q.All).First(m => m.Name == "GetComponentProperties" && m.GetParameters().Length == 1)
+            .Invoke(null, new[] { comp });
+        foreach (var d in descs)
+        {
+            var choices = Q.TryF(d, "Choices") as IEnumerable;
+            if (choices == null) continue;
+            var arr = new JArray();
+            foreach (var ch in choices)
+                arr.Add(new JObject { { "name", Convert.ToString(Q.TryF(ch, "PrettyName")) }, { "value", Convert.ToString(Q.TryF(ch, "Value"), System.Globalization.CultureInfo.InvariantCulture) } });
+            if (arr.Count > 0) res[Convert.ToString(Q.TryF(d, "CodeName"))] = arr;
+        }
         return res;
     }
 
@@ -277,22 +317,155 @@ static class QsysHelper
         var typeName = (string)spec["type"];
         var t = InventoryTypes().FirstOrDefault(x => x.Name == typeName);
         if (t == null) throw new Exception("unknown inventory type '" + typeName + "' (see info.inventory_types)");
-        var item = Activator.CreateInstance(t, true);
+        object item;
+        var ctor = ModelConstructor(t);
+        if (spec["model"] != null || t.GetConstructor(Type.EmptyTypes) == null)
+        {
+            if (ctor == null) throw new Exception(typeName + " takes no model");
+            var modelT = ctor.GetParameters()[0].ParameterType;
+            if (spec["model"] == null) throw new Exception(typeName + " needs a model: " + string.Join(", ", Enum.GetNames(modelT)));
+            item = ctor.Invoke(new[] { EnumValue(modelT, (string)spec["model"]) });
+        }
+        else item = Activator.CreateInstance(t, true);
         ((IList)Q.Get(doc, "Inventory")).Add(item);
         if (spec["name"] != null) Q.Set(item, "Name", (string)spec["name"]);
-        var set = spec["set"] as JObject;
-        if (set != null)
-            foreach (var kv in set)
-            {
-                var p = item.GetType().GetProperty(kv.Key, Q.All);
-                if (p == null) throw new Exception(typeName + " has no property " + kv.Key);
-                object v = p.PropertyType.IsEnum ? Enum.Parse(p.PropertyType, (string)kv.Value, true) : Convert.ChangeType(Scalar(kv.Value), p.PropertyType);
-                p.SetValue(item, v, null);
-            }
+        SetMembers(item, spec["set"] as JObject);
+        var usb = spec["usb_bridge"] as JObject;
+        if (usb != null)
+        {
+            var bridge = Q.TryGet(item, "UsbBridge");
+            if (bridge == null) throw new Exception(typeName + " has no USB bridge");
+            ConfigureUsbBridge(bridge, usb);
+        }
         return item;
     }
 
+    static object EnumValue(Type et, string name)
+    {
+        var match = Enum.GetNames(et).FirstOrDefault(n => n.Equals(name, StringComparison.OrdinalIgnoreCase));
+        if (match == null) throw new Exception(et.Name + " has no value '" + name + "'; values: " + string.Join(", ", Enum.GetNames(et)));
+        return Enum.Parse(et, match);
+    }
+
+    // Sets public properties by name: enums by name, the rest converted from the JSON scalar.
+    static void SetMembers(object target, JObject set)
+    {
+        if (set == null) return;
+        foreach (var kv in set)
+        {
+            var p = target.GetType().GetProperty(kv.Key, Q.All);
+            if (p == null || !p.CanWrite) throw new Exception(target.GetType().Name + " has no settable property " + kv.Key);
+            var pt = Nullable.GetUnderlyingType(p.PropertyType) ?? p.PropertyType;
+            object v = pt.IsEnum ? EnumValue(pt, (string)kv.Value) : Convert.ChangeType(Scalar(kv.Value), pt);
+            p.SetValue(target, v, null);
+        }
+    }
+
+    // USB bridge of the Core or of a peripheral (I/O-USB Bridge...). Designer only creates the
+    // bridge's USB slots (and so its Speakerphone/Soundcard placeables) when USBSlotType changes,
+    // so the slot type is set through None first.
+    static void ConfigureUsbBridge(object bridge, JObject usb)
+    {
+        var rest = (JObject)usb.DeepClone();
+        var slot = (string)rest["USBSlotType"];
+        if (slot != null)
+        {
+            rest.Remove("USBSlotType");
+            Q.SetEnum(bridge, "USBSlotType", "None");
+            Q.SetEnum(bridge, "USBSlotType", slot);
+        }
+        SetMembers(bridge, rest);
+    }
+
+    // Exposes control pins (Properties > Control Pins in Designer), e.g. "connected", "active".
+    static void AddControlPins(object comp, JArray ids)
+    {
+        if (ids == null) return;
+        var specT = Q.T("QSC.QSys.windows.Editors.PinSpec");
+        var create = Q.T("QSC.QSys.windows.Editors.ControlPinEditor").GetMethod("CreatePins", Q.All);
+        foreach (var idTok in ids)
+        {
+            var id = (string)idTok;
+            var d = Descriptor(comp, id);
+            if (d == null) throw new Exception(NameOf(comp) + " has no control " + id + " for a control pin");
+            var style = Q.TryF(d, "PinStyle");
+            if (style == null || style.ToString() == "None") throw new Exception(NameOf(comp) + "." + id + " cannot have a control pin");
+            if (Q.L(Q.Get(comp, "Pins")).Any(p => (string)Q.F(p, "CodeName") == id)) continue;
+            var spec = Activator.CreateInstance(specT);
+            var pretty = Convert.ToString(Q.TryF(d, "PrettyName"));
+            Q.Set(spec, "CodeName", id);
+            Q.Set(spec, "PrettyName", pretty);
+            Q.Set(spec, "Label", pretty);
+            specT.GetProperty("PinStyle").SetValue(spec, style, null);
+            create.Invoke(null, new[] { comp, spec });
+        }
+    }
+
+    // A schematic plugin, from an installed .qplug (by its name or id) or from a given file.
+    static string PluginClass(JToken plugin, string pluginFile)
+    {
+        var mgrT = Q.T("QSC.QSys.Design.Plugins.Manager");
+        var files = new List<string>();
+        if (pluginFile != null) files.Add(Path.GetFullPath(pluginFile));
+        else
+        {
+            var docs = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+            foreach (var dir in new[] { Path.Combine(docs, "QSC", "Q-Sys Designer", "Plugins"), Path.Combine(docs, "QSC", "Q-Sys Designer", "Assets") })
+                if (Directory.Exists(dir)) files.AddRange(Directory.GetFiles(dir, "*.qplug*", SearchOption.AllDirectories)
+                    .Where(f => f.EndsWith(".qplug") || f.EndsWith(".qplugx") || f.EndsWith(".qplugx2")));
+        }
+        var want = (string)plugin;
+        var seen = new List<string>();
+        foreach (var f in files)
+        {
+            string name, id;
+            if (f.EndsWith(".qplug"))
+            {
+                var text = File.ReadAllText(f);
+                name = System.Text.RegularExpressions.Regex.Match(text, "Name\\s*=\\s*\"([^\"]+)\"").Groups[1].Value;
+                id = System.Text.RegularExpressions.Regex.Match(text, "Id\\s*=\\s*\"([^\"]+)\"").Groups[1].Value;
+            }
+            else
+            {
+                // Asset Manager plugins are encrypted: name them after their asset folder,
+                // e.g. ...\Shure-Microflex-Advance.1.1.0.0\content\x.qplugx2 -> "Shure Microflex Advance"
+                var dir = Path.GetDirectoryName(f);
+                if (Path.GetFileName(dir) == "content") dir = Path.GetDirectoryName(dir);
+                name = System.Text.RegularExpressions.Regex.Replace(Path.GetFileName(dir), "(\\.\\d+)+$", "").Replace('-', ' ');
+                id = Path.GetFileNameWithoutExtension(f);
+            }
+            seen.Add(name);
+            var shortName = name.Contains("~") ? name.Substring(name.LastIndexOf('~') + 1) : name;
+            if (pluginFile == null && !(string.Equals(want, name, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(want, shortName, StringComparison.OrdinalIgnoreCase) || string.Equals(want, id, StringComparison.OrdinalIgnoreCase)))
+                continue;
+            Q.Call(mgrT, "ReadPluginToCatalog", f, false);
+            var all = (IDictionary)mgrT.GetProperty("AllPlugins", Q.All).GetValue(null, null);
+            foreach (DictionaryEntry kv in all)
+                if (string.Equals(Convert.ToString(Q.Get(kv.Value, "FilePath")), f, StringComparison.OrdinalIgnoreCase))
+                    return (string)Q.Get(kv.Value, "ClassId");
+            throw new Exception("Designer could not read the plugin " + f);
+        }
+        throw new Exception("plugin '" + want + "' is not installed (install it with Designer's Asset Manager, or give plugin_file); installed: " +
+            (seen.Count == 0 ? "none" : string.Join(", ", seen)));
+    }
+
     // ---- build ------------------------------------------------------------------------
+    // What building or editing a design works on: the document, its inventory, pages, blocks by name,
+    // the page of each block and the signal names already used (name -> output pin).
+    class Ctx
+    {
+        public object Doc, Core;
+        public Dictionary<string, object> Inventory = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+        public Dictionary<string, object> Pages = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+        public List<string> PageNames = new List<string>();
+        public Dictionary<string, object> Comps = new Dictionary<string, object>(StringComparer.Ordinal);
+        public Dictionary<object, string> CompPage = new Dictionary<object, string>();
+        public Dictionary<string, object> SignalNames = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+        public JArray Warnings = new JArray();
+        public object Layer(string page) { return Q.L(Q.Get(Pages[page], "Layers"))[0]; }
+    }
+
     static JObject Build(JObject req)
     {
         var path = Path.GetFullPath((string)req["path"]);
@@ -303,7 +476,7 @@ static class QsysHelper
         var doc = NewDocument(path, out manager);
         Q.Call(manager, "StartOperation");
         var core = Q.Get(doc, "Core");
-        var warnings = new JArray();
+        var ctx = new Ctx { Doc = doc, Core = core };
         var valuesOut = new JArray();
 
         var coreSpec = spec["core"] as JObject;
@@ -313,119 +486,276 @@ static class QsysHelper
             if (coreSpec["name"] != null) Q.Set(core, "Name", (string)coreSpec["name"]);
         }
         if (spec["usb_sound_cards"] != null) Q.Set(Q.Get(core, "UsbBridge"), "USBCount", (int)spec["usb_sound_cards"]);
-        var inventory = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
-        inventory[Convert.ToString(Q.Get(core, "Name"))] = core;
-        foreach (JObject inv in (spec["inventory"] as JArray ?? new JArray()))
-        {
-            var item = AddInventory(doc, inv);
-            var actual = Convert.ToString(Q.Get(item, "Name"));
-            inventory[actual] = item;
-            if (inv["name"] != null && (string)inv["name"] != actual)
-            {
-                inventory[(string)inv["name"]] = item;   // keep the spec's name usable
-                warnings.Add("inventory item '" + inv["name"] + "' was renamed by Designer to '" + actual + "'");
-            }
-        }
+        if (coreSpec != null && coreSpec["usb_bridge"] is JObject) ConfigureUsbBridge(Q.Get(core, "UsbBridge"), (JObject)coreSpec["usb_bridge"]);
+        SetMembers(Q.Get(doc, "Properties"), spec["design_properties"] as JObject);
+        ctx.Inventory[Convert.ToString(Q.Get(core, "Name"))] = core;
+        foreach (JObject inv in (spec["inventory"] as JArray ?? new JArray())) AddInventoryItem(ctx, inv);
 
         // schematic pages
-        var pages = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
-        var pageNames = (spec["pages"] as JArray ?? new JArray("Main")).Select(x => (string)x).ToList();
         var docPages = (IList)Q.Get(doc, "Pages");
-        for (int i = 0; i < pageNames.Count; i++)
+        foreach (var title in (spec["pages"] as JArray ?? new JArray("Main")).Select(x => (string)x))
         {
             object page;
-            if (i < docPages.Count) page = docPages[i];
+            if (ctx.PageNames.Count < docPages.Count) page = docPages[ctx.PageNames.Count];
             else
             {
                 page = Activator.CreateInstance(docPages[0].GetType(), true);
                 docPages.Add(page);
             }
-            Q.Set(page, "Title", pageNames[i]);
-            if (Q.L(Q.Get(page, "Layers")).Count == 0) throw new Exception("could not create schematic page '" + pageNames[i] + "' (no layer)");
-            pages[pageNames[i]] = page;
+            Q.Set(page, "Title", title);
+            if (Q.L(Q.Get(page, "Layers")).Count == 0) throw new Exception("could not create schematic page '" + title + "' (no layer)");
+            ctx.Pages[title] = page;
+            ctx.PageNames.Add(title);
         }
 
-        // components
-        var comps = new Dictionary<string, object>(StringComparer.Ordinal);
-        var compPage = new Dictionary<object, string>();
+        // components, then their stored values (after all components exist; Lua comes from text_controller.lua)
+        foreach (JObject cs in (spec["components"] as JArray ?? new JArray())) CreateComponent(ctx, cs);
         foreach (JObject cs in (spec["components"] as JArray ?? new JArray()))
-        {
-            var name = (string)cs["name"];
-            if (string.IsNullOrEmpty(name)) throw new Exception("every component needs a name");
-            if (comps.ContainsKey(name)) throw new Exception("duplicate component name " + name);
-            object c;
-            var invSpec = cs["inventory"];
-            if (invSpec != null)
-            {
-                string itemName = invSpec.Type == JTokenType.Object ? (string)invSpec["item"] : null;
-                string placeable = invSpec.Type == JTokenType.Object ? (string)invSpec["placeable"] : (string)invSpec;
-                object owner = itemName == null ? core : (inventory.ContainsKey(itemName) ? inventory[itemName] : null);
-                if (owner == null) throw new Exception(name + ": no inventory item '" + itemName + "'");
-                c = Q.PlaceFromInventory(owner, placeable);
-            }
-            else
-            {
-                c = Q.NewComponent((string)cs["class"]);
-                var props = cs["properties"] as JObject;
-                if (props != null) foreach (var kv in props) Q.SetProp(c, kv.Key, Scalar(kv.Value));
-                var tc = cs["text_controller"] as JObject;
-                if (tc != null) Q.SetProp(c, "config", TextControllerConfig((JArray)tc["controls"]));
-                Q.Refresh(c);
-            }
-            var pageName = (string)cs["page"] ?? pageNames[0];
-            if (!pages.ContainsKey(pageName)) throw new Exception(name + ": no page '" + pageName + "' (declare it in spec.pages)");
-            Q.Set(c, "Position", new System.Windows.Point((double?)cs["x"] ?? 0, (double?)cs["y"] ?? 0));
-            Q.Call(Q.L(Q.Get(pages[pageName], "Layers"))[0], "AddChild", c);
-            Q.Set(c, "CodeName", name);
-            Q.Set(c, "UserLabel", (string)cs["label"] ?? name);
-            SetAccess(c, (string)cs["script_access"] ?? "None");
-            if ((string)Q.Get(c, "CodeName") != name) warnings.Add(name + ": Designer renamed it to " + Q.Get(c, "CodeName"));
-            comps[name] = c;
-            compPage[c] = pageName;
-        }
+            valuesOut.Merge(StoreComponentValues(ctx.Comps[(string)cs["name"]], cs, cache));
 
-        // stored values (after all components exist; Lua comes from text_controller.lua)
-        foreach (JObject cs in (spec["components"] as JArray ?? new JArray()))
-        {
-            var c = comps[(string)cs["name"]];
-            var tc = cs["text_controller"] as JObject;
-            if (tc != null && tc["lua"] != null) StoreString(c, "code", (string)tc["lua"]);
-            var values = cs["values"] as JObject;
-            if (values == null) continue;
-            foreach (var kv in values) valuesOut.Add(StoreValue(c, kv.Key, kv.Value, cache));
-        }
-
-        // wires
         int wireCount = 0;
-        foreach (var w in (spec["wires"] as JArray ?? new JArray()))
-        {
-            string from, to;
-            if (w.Type == JTokenType.Array) { from = (string)w[0]; to = (string)w[1]; }
-            else { from = (string)w["from"]; to = (string)w["to"]; }
-            var a = ResolvePin(comps, from, "Output");
-            var b = ResolvePin(comps, to, "Input");
-            if (Q.F(a, "Domain").ToString() != Q.F(b, "Domain").ToString())
-                throw new Exception("wire " + from + " -> " + to + ": pin types differ (" + Q.F(a, "Domain") + " vs " + Q.F(b, "Domain") + ")");
-            var pa = compPage[Q.F(a, "Provider")]; var pb = compPage[Q.F(b, "Provider")];
-            if (pa != pb) throw new Exception("wire " + from + " -> " + to + " crosses pages (" + pa + " / " + pb + "); Q-SYS wires must stay on one page");
-            var wire = Activator.CreateInstance(Q.T("QSC.QSys.Design.Wire"), true);
-            Q.Set(wire, "PinA", a);
-            Q.Set(wire, "PinB", b);
-            Q.Call(Q.L(Q.Get(pages[pa], "Layers"))[0], "AddChild", wire);
-            wireCount++;
-        }
+        foreach (var w in (spec["wires"] as JArray ?? new JArray())) { AddWire(ctx, Ends(w, "wire")); wireCount++; }
+        int signalLinks = 0;
+        foreach (var s in (spec["signals"] as JArray ?? new JArray())) { AddSignalLink(ctx, Ends(s, "signal")); signalLinks++; }
+        int graphics = 0;
+        foreach (JObject gs in (spec["graphics"] as JArray ?? new JArray())) { AddGraphic(ctx, gs); graphics++; }
+
+        // snapshot banks and their Snapshot Controllers
+        var banks = new JArray();
+        foreach (JObject bs in (spec["snapshot_banks"] as JArray ?? new JArray()))
+            banks.Add(BuildBank(doc, bs, ctx.Comps, ctx.CompPage, ctx.Pages, ctx.PageNames[0]));
 
         // UCIs
         int uciElements = 0;
-        foreach (JObject us in (spec["ucis"] as JArray ?? new JArray())) uciElements += BuildUci(doc, us, comps);
+        var uciSizes = new JArray();
+        foreach (JObject us in (spec["ucis"] as JArray ?? new JArray())) uciElements += BuildUci(doc, us, ctx.Comps, uciSizes);
 
         EndOperation(manager);
         AttachAll(doc);
         Save(doc, path);
         return new JObject {
             { "path", path }, { "bytes", new FileInfo(path).Length }, { "designer_version", DesignerVersion() },
-            { "core", Convert.ToString(Q.Get(core, "CoreModelPretty")) }, { "components", comps.Count }, { "wires", wireCount },
-            { "uci_elements", uciElements }, { "values", valuesOut }, { "warnings", warnings } };
+            { "core", Convert.ToString(Q.Get(core, "CoreModelPretty")) }, { "components", ctx.Comps.Count }, { "wires", wireCount },
+            { "signal_names", ctx.SignalNames.Count }, { "signal_links", signalLinks }, { "graphics", graphics }, { "snapshot_banks", banks },
+            { "uci_elements", uciElements }, { "uci_sizes", uciSizes }, { "values", valuesOut }, { "warnings", ctx.Warnings } };
+    }
+
+    static object AddInventoryItem(Ctx ctx, JObject inv)
+    {
+        var item = AddInventory(ctx.Doc, inv);
+        var actual = Convert.ToString(Q.Get(item, "Name"));
+        ctx.Inventory[actual] = item;
+        if (inv["name"] != null && (string)inv["name"] != actual)
+        {
+            ctx.Inventory[(string)inv["name"]] = item;   // keep the spec's name usable
+            ctx.Warnings.Add("inventory item '" + inv["name"] + "' was renamed by Designer to '" + actual + "'");
+        }
+        return item;
+    }
+
+    // One component spec (class, inventory placeable or plugin) placed on its page under its name.
+    static object CreateComponent(Ctx ctx, JObject cs)
+    {
+        var name = (string)cs["name"];
+        if (string.IsNullOrEmpty(name)) throw new Exception("every component needs a name");
+        if (ctx.Comps.ContainsKey(name)) throw new Exception("duplicate component name " + name);
+        object c;
+        var invSpec = cs["inventory"];
+        if (invSpec != null)
+        {
+            string itemName = invSpec.Type == JTokenType.Object ? (string)invSpec["item"] : null;
+            string placeable = invSpec.Type == JTokenType.Object ? (string)invSpec["placeable"] : (string)invSpec;
+            object owner = itemName == null ? ctx.Core : (ctx.Inventory.ContainsKey(itemName) ? ctx.Inventory[itemName] : null);
+            if (owner == null) throw new Exception(name + ": no inventory item '" + itemName + "'");
+            c = Q.PlaceFromInventory(owner, placeable);
+        }
+        else
+        {
+            var cls = cs["plugin"] != null || cs["plugin_file"] != null ? PluginClass(cs["plugin"], (string)cs["plugin_file"]) : (string)cs["class"];
+            c = Q.NewComponent(cls);
+            var props = cs["properties"] as JObject;
+            if (props != null) foreach (var kv in props) Q.SetProp(c, kv.Key, Scalar(kv.Value));
+            var tc = cs["text_controller"] as JObject;
+            if (tc != null) Q.SetProp(c, "config", TextControllerConfig((JArray)tc["controls"]));
+            Q.Refresh(c);
+        }
+        var pageName = (string)cs["page"] ?? ctx.PageNames[0];
+        if (!ctx.Pages.ContainsKey(pageName)) throw new Exception(name + ": no page '" + pageName + "' (declare it in spec.pages)");
+        Q.Set(c, "Position", new System.Windows.Point((double?)cs["x"] ?? 0, (double?)cs["y"] ?? 0));
+        Q.Call(ctx.Layer(pageName), "AddChild", c);
+        Q.Set(c, "CodeName", name);
+        Q.Set(c, "UserLabel", (string)cs["label"] ?? name);
+        SetAccess(c, (string)cs["script_access"] ?? "None");
+        if (((string)Q.Get(c, "ClassName")).StartsWith("%PLUGIN%")) Q.Call(Q.T("QSC.QSys.Design.Plugins.Manager"), "AddPluginComponent", c);
+        AddControlPins(c, cs["control_pins"] as JArray);
+        if ((string)Q.Get(c, "CodeName") != name) ctx.Warnings.Add(name + ": Designer renamed it to " + Q.Get(c, "CodeName"));
+        ctx.Comps[name] = c;
+        ctx.CompPage[c] = pageName;
+        return c;
+    }
+
+    static JArray StoreComponentValues(object c, JObject cs, JArray cache)
+    {
+        var res = new JArray();
+        var tc = cs["text_controller"] as JObject;
+        if (tc != null && tc["lua"] != null) StoreString(c, "code", (string)tc["lua"]);
+        var values = cs["values"] as JObject;
+        if (values != null) foreach (var kv in values) res.Add(StoreValue(c, kv.Key, kv.Value, cache));
+        return res;
+    }
+
+    // [from, to, name?] or {"from", "to", "signal"}
+    static string[] Ends(JToken t, string what)
+    {
+        if (t.Type == JTokenType.Array) return new[] { (string)t[0], (string)t[1], ((JArray)t).Count > 2 ? (string)t[2] : null };
+        if (t.Type == JTokenType.Object) return new[] { (string)t["from"], (string)t["to"], (string)t["signal"] };
+        throw new Exception(what + " must be [from, to, name] or {from, to, signal}, not " + t.ToString(Newtonsoft.Json.Formatting.None));
+    }
+
+    // A signal name belongs to one output pin; it may already label that same pin.
+    static void NameSignal(Ctx ctx, object outPin, string endpoint, string signal)
+    {
+        object owner;
+        if (ctx.SignalNames.TryGetValue(signal, out owner) && owner != outPin)
+            throw new Exception("signal name '" + signal + "' is already used by another output pin (" + endpoint + ")");
+        var current = Convert.ToString(Q.Get(outPin, "Label"));
+        if (!string.IsNullOrEmpty(current) && current != signal)
+            throw new Exception(endpoint + " already carries the signal name '" + current + "', not '" + signal + "'");
+        Q.Set(outPin, "Label", signal);
+        ctx.SignalNames[signal] = outPin;
+    }
+
+    static object AddWire(Ctx ctx, string[] e)
+    {
+        var a = ResolvePin(ctx.Comps, e[0], "Output");
+        // A signal name labels the source pin; Designer shows it on every wire leaving that pin.
+        if (!string.IsNullOrEmpty(e[2])) NameSignal(ctx, a, e[0], e[2]);
+        var b = ResolvePin(ctx.Comps, e[1], "Input");
+        if (Q.F(a, "Domain").ToString() != Q.F(b, "Domain").ToString())
+            throw new Exception("wire " + e[0] + " -> " + e[1] + ": pin types differ (" + Q.F(a, "Domain") + " vs " + Q.F(b, "Domain") + ")");
+        if (WiresOf(ctx, b).Count > 0) throw new Exception("wire " + e[0] + " -> " + e[1] + ": the input already has a wire");
+        var pa = ctx.CompPage[Q.F(a, "Provider")]; var pb = ctx.CompPage[Q.F(b, "Provider")];
+        if (pa != pb) throw new Exception("wire " + e[0] + " -> " + e[1] + " crosses pages (" + pa + " / " + pb + "); Q-SYS wires must stay on one page");
+        var wire = Activator.CreateInstance(Q.T("QSC.QSys.Design.Wire"), true);
+        Q.Set(wire, "PinA", a);
+        Q.Set(wire, "PinB", b);
+        Q.Call(ctx.Layer(pa), "AddChild", wire);
+        return wire;
+    }
+
+    // Connection by signal name only: the same name on an output pin and on input pins joins them
+    // without a wire (pins can be far apart or on different pages).
+    static void AddSignalLink(Ctx ctx, string[] e)
+    {
+        if (string.IsNullOrEmpty(e[2])) throw new Exception("signal " + e[0] + " -> " + e[1] + " needs a name");
+        var a = ResolvePin(ctx.Comps, e[0], "Output");
+        var b = ResolvePin(ctx.Comps, e[1], "Input");
+        if (Q.F(a, "Domain").ToString() != Q.F(b, "Domain").ToString())
+            throw new Exception("signal " + e[0] + " -> " + e[1] + ": pin types differ (" + Q.F(a, "Domain") + " vs " + Q.F(b, "Domain") + ")");
+        if (WiresOf(ctx, b).Count > 0) throw new Exception("signal " + e[0] + " -> " + e[1] + ": the input already has a wire");
+        var current = Convert.ToString(Q.Get(b, "Label"));
+        if (!string.IsNullOrEmpty(current) && current != e[2])
+            throw new Exception(e[1] + " already carries the signal name '" + current + "', not '" + e[2] + "'");
+        NameSignal(ctx, a, e[0], e[2]);
+        Q.Set(b, "Label", e[2]);
+    }
+
+    static object AddGraphic(Ctx ctx, JObject gs)
+    {
+        var pageName = (string)gs["page"] ?? ctx.PageNames[0];
+        if (!ctx.Pages.ContainsKey(pageName)) throw new Exception("graphics: no page '" + pageName + "'");
+        var el = SchematicGraphic(gs);
+        Q.Call(ctx.Layer(pageName), "AddChild", el);
+        return el;
+    }
+
+    // {"type": "text"|"group", x, y, w, h, text, fill, text_color, stroke_color, font_size, align, valign, bold, z}
+    static object SchematicGraphic(JObject gs)
+    {
+        var kind = (string)gs["type"] ?? "text";
+        object el;
+        if (kind == "text")
+        {
+            el = Activator.CreateInstance(Q.T("QSC.QSys.Design.Graphics.TextBlock"), true);
+            Q.SetEnum(el, "VerticalTextAlignment", (string)gs["valign"] ?? "Center");
+            Q.Set(el, "Fill", Q.C((string)gs["fill"] ?? "#00000000"));
+        }
+        else if (kind == "group")
+        {
+            el = Activator.CreateInstance(Q.T("QSC.QSys.Design.Graphics.GroupBox"), true);
+            Q.Set(el, "Fill", Q.C((string)gs["fill"] ?? "#00000000"));
+            Q.Set(el, "CornerRadius", (double?)gs["corner_radius"] ?? 8);
+            Q.Set(el, "StrokeWidth", (int?)gs["stroke_width"] ?? 1);
+        }
+        else throw new Exception("graphics type must be text or group, not " + kind);
+        Q.Set(el, "Label", (string)gs["text"] ?? "");
+        Place(el, gs);
+        Q.Set(el, "TextColor", Q.C((string)gs["text_color"] ?? "#FF333333"));
+        Q.Set(el, "StrokeColor", Q.C((string)gs["stroke_color"] ?? "#FF000000"));
+        Q.Set(el, "Font", (string)gs["font"] ?? "Roboto");
+        Q.Set(el, "Face", (bool?)gs["bold"] == true ? "Bold" : "Regular");
+        Q.Set(el, "FontSize", (double?)gs["font_size"] ?? 12);
+        Q.SetEnum(el, "HorizontalTextAlignment", (string)gs["align"] ?? (kind == "group" ? "Left" : "Center"));
+        // group boxes sit behind the blocks unless told otherwise
+        Q.Set(el, "ZOrder", (int?)gs["z"] ?? (kind == "group" ? -100 : 0));
+        return el;
+    }
+
+    // {"name", "count", "mode", "controls": [{"component", "controls": [ids]} | {"component", "all": true}],
+    //  "controller": {"name", "x", "y", "page", "label", "script_access"}}
+    static JObject BuildBank(object doc, JObject bs, Dictionary<string, object> comps, Dictionary<object, string> compPage,
+                             Dictionary<string, object> pages, string firstPage)
+    {
+        var name = (string)bs["name"];
+        if (string.IsNullOrEmpty(name)) throw new Exception("every snapshot bank needs a name");
+        var bank = Activator.CreateInstance(Q.T("QSC.QSys.Design.Snapshot.Bank"), true);
+        ((IList)Q.Get(doc, "Snapshots")).Add(bank);
+        Q.Set(bank, "Name", name);
+        Q.Set(bank, "Count", (int?)bs["count"] ?? 8);
+        if (bs["mode"] != null) Q.SetEnum(bank, "Mode", (string)bs["mode"]);
+        var scT = Q.T("QSC.QSys.Design.Snapshot.Component");
+        var ctlT = Q.T("QSC.QSys.Design.Snapshot.Control");
+        int n = 0;
+        foreach (JObject entry in (bs["controls"] as JArray ?? new JArray()))
+        {
+            object comp;
+            if (!comps.TryGetValue((string)entry["component"], out comp)) throw new Exception("snapshot bank " + name + ": no component " + entry["component"]);
+            var sc = Activator.CreateInstance(scT, true);
+            Q.Set(sc, "DesignComponent", comp);
+            var all = (bool?)entry["all"] == true;
+            Q.Set(sc, "IsInclusive", all);
+            ((IList)Q.Get(bank, "Components")).Add(sc);
+            foreach (var idTok in (entry["controls"] as JArray ?? new JArray()))
+            {
+                var id = (string)idTok;
+                var d = Descriptor(comp, id);
+                if (d == null) throw new Exception("snapshot bank " + name + ": " + entry["component"] + " has no control " + id);
+                var ctl = Activator.CreateInstance(ctlT, true);
+                Q.Set(ctl, "CodeName", id);
+                Q.Set(ctl, "PrettyName", Convert.ToString(Q.TryF(d, "PrettyName")));
+                ((IList)Q.Get(sc, "Controls")).Add(ctl);
+                n++;
+            }
+        }
+        var res = new JObject { { "name", name }, { "count", (int)Q.Get(bank, "Count") }, { "controls", n }, { "file", Convert.ToString(Q.Get(bank, "FileName")) } };
+        var cs = bs["controller"] as JObject;
+        if (cs != null)
+        {
+            var c = Q.Call(Q.Get(bank, "Creator"), "GetComponent");
+            var pageName = (string)cs["page"] ?? firstPage;
+            if (!pages.ContainsKey(pageName)) throw new Exception("snapshot bank " + name + ": no page '" + pageName + "'");
+            Q.Set(c, "Position", new System.Windows.Point((double?)cs["x"] ?? 0, (double?)cs["y"] ?? 0));
+            Q.Call(Q.L(Q.Get(pages[pageName], "Layers"))[0], "AddChild", c);
+            var code = (string)cs["name"] ?? name;
+            if (comps.ContainsKey(code)) throw new Exception("duplicate component name " + code);
+            Q.Set(c, "CodeName", code);
+            if (cs["label"] != null) Q.Set(c, "UserLabel", (string)cs["label"]);
+            SetAccess(c, (string)cs["script_access"] ?? "None");
+            comps[code] = c;
+            compPage[c] = pageName;
+            res["controller"] = code;
+        }
+        return res;
     }
 
     // "NAME.out.3", "NAME.in.2", "NAME.in.Reference" (pin name, case-insensitive)
@@ -446,6 +776,8 @@ static class QsysHelper
             return pins[n - 1];
         }
         var byName = pins.Where(p => string.Equals(Q.PinName(p), pinRef, StringComparison.OrdinalIgnoreCase)).ToList();
+        if (byName.Count == 0)   // control pins can also be named by their control id, e.g. "camera_status"
+            byName = pins.Where(p => string.Equals(Convert.ToString(Q.F(p, "CodeName")), pinRef, StringComparison.OrdinalIgnoreCase)).ToList();
         if (byName.Count != 1)
             throw new Exception(name + " has no single " + direction.ToLower() + " pin named '" + pinRef + "'; pins: " + string.Join(", ", pins.Select(Q.PinName)));
         return byName[0];
@@ -570,11 +902,15 @@ static class QsysHelper
     static string Cap(string s) { return string.IsNullOrEmpty(s) ? s : char.ToUpperInvariant(s[0]) + s.Substring(1); }
 
     // ---- UCI ----------------------------------------------------------------------------
-    static int BuildUci(object doc, JObject us, Dictionary<string, object> comps)
+    static int BuildUci(object doc, JObject us, Dictionary<string, object> comps, JArray sizes)
     {
         var panel = Activator.CreateInstance(Q.T("QSC.QSys.Design.WebPanels.Panel"), true);
         Q.Set(panel, "Title", (string)us["name"]);
         ((IList)Q.Get(doc, "WebPanels")).Add(panel);
+        var size = new JObject { { "name", (string)us["name"] } };
+        if (us["width"] != null || us["height"] != null) QUci.SetSize(panel, (int?)us["width"] ?? 0, (int?)us["height"] ?? 0, size);
+        else QUci.ReadSize(panel, size);
+        sizes.Add(size);
         var pages = (IList)Q.Get(panel, "Pages");
         int count = 0, index = 0;
         foreach (JObject ps in (us["pages"] as JArray ?? new JArray()))
@@ -591,13 +927,16 @@ static class QsysHelper
             Q.Set(page, "Title", (string)ps["name"]);
             if (ps["color"] != null) Q.Set(page, "Color", Q.C((string)ps["color"]));
             var layer = Q.L(Q.Get(page, "Layers"))[0];
-            foreach (JObject es in (ps["elements"] as JArray ?? new JArray()))
+            // group boxes first: they get the page's lowest ZOrder, so they sit behind everything else on it
+            var elements = (ps["elements"] as JArray ?? new JArray()).Cast<JObject>().ToList();
+            foreach (var es in elements.Where(e => QUci.IsFrame(e)).Concat(elements.Where(e => !QUci.IsFrame(e))))
             {
                 var kind = (string)es["type"] ?? "control";
                 object el;
                 if (kind == "text") el = UciText(layer, es);
                 else if (kind == "control") el = UciControl(layer, es, comps);
-                else throw new Exception("UCI element type must be control or text, not " + kind);
+                else if (QUci.IsGraphic(kind)) el = QUci.Graphic(layer, kind, es);
+                else throw new Exception("UCI element type must be control, text, group_box or header, not " + kind);
                 Q.Set(el, "ZOrder", ++count);
             }
         }
@@ -668,7 +1007,7 @@ static class QsysHelper
             pagesOut.Add(title);
             foreach (var k in kids)
             {
-                if (k.GetType().Name == "Component") { comps.Add(k); pageOf[k] = title; }
+                if (IsComponent(k)) { comps.Add(k); pageOf[k] = title; }
                 else if (k.GetType().Name == "Wire") wires.Add(k);
             }
         }
@@ -688,6 +1027,8 @@ static class QsysHelper
                 { "page", pageOf[c] }, { "script_access", Q.Get(c, "ScriptAccess").ToString() } };
             var pos = (System.Windows.Point)Q.Get(c, "Position");
             o["x"] = pos.X; o["y"] = pos.Y;
+            var csize = Q.TryGet(c, "Size");
+            if (csize is System.Windows.Size) { o["w"] = ((System.Windows.Size)csize).Width; o["h"] = ((System.Windows.Size)csize).Height; }
             o["properties"] = Props(c);
             var vals = new JObject();
             var cached = (IDictionary)Q.Get(c, "CachedControlValues");
@@ -715,6 +1056,25 @@ static class QsysHelper
         }
         res["components"] = compsOut;
         res["wires"] = new JArray(wires.Select(w => new JArray(Ref(Q.Get(w, "PinA")), Ref(Q.Get(w, "PinB")))));
+        // pins joined by signal name only (no wire): an input named like an output is fed by it
+        var outputsByName = new Dictionary<string, object>();
+        foreach (var c in comps)
+            foreach (var p in Q.Pins(c, "Output"))
+            {
+                var n = Convert.ToString(Q.Get(p, "Label"));
+                if (!string.IsNullOrEmpty(n) && !outputsByName.ContainsKey(n)) outputsByName[n] = p;
+            }
+        var links = new JArray();
+        foreach (var c in comps)
+            foreach (var p in Q.Pins(c, "Input"))
+            {
+                var n = Convert.ToString(Q.Get(p, "Label"));
+                object src;
+                if (string.IsNullOrEmpty(n) || Q.L(Q.Get(p, "Wires")).Count > 0 || !outputsByName.TryGetValue(n, out src)) continue;
+                links.Add(new JArray(Ref(src), Ref(p), n));
+                ((JArray)res["wires"]).Add(new JArray(Ref(src), Ref(p)));
+            }
+        res["signal_links"] = links;
         var byId = comps.ToDictionary(c => Convert.ToString(Q.Get(c, "Id")), c => c);
         var ucis = new JArray();
         foreach (var panel in Q.L(Q.Get(doc, "WebPanels")))
@@ -729,6 +1089,8 @@ static class QsysHelper
                     var size = Q.TryGet(el, "Size");
                     var eo = new JObject { { "type", el.GetType().Name }, { "x", pos.X }, { "y", pos.Y } };
                     if (size is System.Windows.Size) { eo["w"] = ((System.Windows.Size)size).Width; eo["h"] = ((System.Windows.Size)size).Height; }
+                    var z = Q.TryGet(el, "ZOrder");
+                    if (z != null) eo["z"] = Convert.ToInt32(z);
                     var label = Convert.ToString(Q.TryGet(el, "Label"));
                     if (!string.IsNullOrEmpty(label)) eo["label"] = label;
                     if (el.GetType().Name == "ControlStyle")
@@ -738,14 +1100,88 @@ static class QsysHelper
                         eo["control"] = Convert.ToString(Q.Get(el, "Name"));
                         eo["style"] = Convert.ToString(Q.TryGet(el, "VisualStyle"));
                     }
+                    else QUci.ReadGraphic(el, eo);
                     els.Add(eo);
                 }
                 pagesJ.Add(new JObject { { "name", Convert.ToString(Q.Get(pg, "Title")) }, { "elements", els } });
             }
-            ucis.Add(new JObject { { "name", Convert.ToString(Q.Get(panel, "Title")) }, { "pages", pagesJ } });
+            var uo = new JObject { { "name", Convert.ToString(Q.Get(panel, "Title")) } };
+            QUci.ReadSize(panel, uo);
+            uo["pages"] = pagesJ;
+            ucis.Add(uo);
         }
         res["ucis"] = ucis;
+
+        var graphics = new JArray();
+        foreach (var page in Q.L(Q.Get(doc, "Pages")))
+            foreach (var g in Q.L(Q.Get(page, "AllChildren")).Where(k => k.GetType().Name == "TextBlock" || k.GetType().Name == "GroupBox"))
+            {
+                var pos = (System.Windows.Point)Q.Get(g, "Position"); var size = (System.Windows.Size)Q.Get(g, "Size");
+                graphics.Add(new JObject { { "type", g.GetType().Name == "GroupBox" ? "group" : "text" }, { "page", Convert.ToString(Q.Get(page, "Title")) },
+                    { "x", pos.X }, { "y", pos.Y }, { "w", size.Width }, { "h", size.Height }, { "text", Convert.ToString(Q.Get(g, "Label")) } });
+            }
+        res["graphics"] = graphics;
+
+        var banks = new JArray();
+        foreach (var bank in Q.L(Q.Get(doc, "Snapshots")).Where(b => b.GetType().Name == "Bank"))
+        {
+            var ctl = new JArray();
+            foreach (var sc in Q.L(Q.Get(bank, "Components")))
+            {
+                var dc = Q.Get(sc, "DesignComponent");
+                ctl.Add(new JObject { { "component", dc == null ? null : NameOf(dc) }, { "all", (bool)Q.Get(sc, "IsInclusive") },
+                    { "controls", new JArray(Q.L(Q.Get(sc, "Controls")).Select(x => Convert.ToString(Q.Get(x, "CodeName")))) } });
+            }
+            var file = Convert.ToString(Q.Get(bank, "FileName"));
+            var stored = Q.L(Q.Get(doc, "CoreFiles")).Select(f => (string)Q.F(f, "FileName"))
+                .Where(f => f.StartsWith("controlset." + file + ".snapshot.")).Select(f => int.Parse(f.Substring(f.LastIndexOf('.') + 1))).OrderBy(i => i);
+            var placed = Q.Get(bank, "Component");
+            banks.Add(new JObject { { "name", Convert.ToString(Q.Get(bank, "Name")) }, { "count", (int)Q.Get(bank, "Count") },
+                { "mode", Q.Get(bank, "Mode").ToString() }, { "controller", placed == null ? null : NameOf(placed) },
+                { "controls", ctl }, { "saved_snapshots", new JArray(stored) } });
+        }
+        res["snapshot_banks"] = banks;
         return res;
+    }
+
+    // copy_snapshots: {from, path, out_path?} - copies the saved contents of each snapshot bank (the
+    // engine's controlset.<bank>.snapshot.N files) from one design into another with banks of the
+    // same names, e.g. from a test copy where the snapshots were saved in emulation.
+    static JObject CopySnapshots(JObject req)
+    {
+        var src = Q.Load(Path.GetFullPath((string)req["from"]));
+        var path = Path.GetFullPath((string)req["path"]);
+        var outPath = Path.GetFullPath((string)req["out_path"] ?? path);
+        var doc = Q.Load(path);
+        Func<object, Dictionary<string, string>> files = d => Q.L(Q.Get(d, "Snapshots")).Where(b => b.GetType().Name == "Bank")
+            .ToDictionary(b => Convert.ToString(Q.Get(b, "Name")), b => Convert.ToString(Q.Get(b, "FileName")));
+        var srcBanks = files(src); var dstBanks = files(doc);
+        var srcFiles = Q.L(Q.Get(src, "CoreFiles"));
+        var dstList = (IList)Q.Get(doc, "CoreFiles");
+        var only = req["banks"] is JArray ? ((JArray)req["banks"]).Select(x => (string)x).ToList() : null;
+        var copied = new JObject();
+        foreach (var kv in dstBanks)
+        {
+            if (only != null && !only.Contains(kv.Key)) continue;
+            string srcFile;
+            if (!srcBanks.TryGetValue(kv.Key, out srcFile)) continue;
+            var prefix = "controlset." + srcFile + ".snapshot.";
+            var mine = "controlset." + kv.Value + ".snapshot.";
+            foreach (var old in dstList.Cast<object>().Where(f => ((string)Q.F(f, "FileName")).StartsWith(mine)).ToList()) dstList.Remove(old);
+            var numbers = new JArray();
+            foreach (var f in srcFiles.Where(f => ((string)Q.F(f, "FileName")).StartsWith(prefix)))
+            {
+                var name = (string)Q.F(f, "FileName");
+                var cf = Activator.CreateInstance(f.GetType());
+                f.GetType().GetField("FileName").SetValue(cf, mine + name.Substring(prefix.Length));
+                f.GetType().GetField("Contents").SetValue(cf, ((byte[])Q.F(f, "Contents")).Clone());
+                dstList.Add(cf);
+                numbers.Add(int.Parse(name.Substring(prefix.Length)));
+            }
+            copied[kv.Key] = new JArray(numbers.OrderBy(x => (int)x));
+        }
+        Save(doc, outPath);
+        return new JObject { { "path", outPath }, { "copied", copied } };
     }
 
     // ---- edit saved files -----------------------------------------------------------------

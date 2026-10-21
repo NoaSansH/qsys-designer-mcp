@@ -81,3 +81,32 @@ def test_close_all_when_clean(monkeypatch):
 def test_open_rejects_missing_file(tmp_path):
     with pytest.raises(app.AppError, match="No .qsys file"):
         app.Designer().open_design(str(tmp_path / "missing.qsys"))
+
+
+def test_scenario_rejects_steps_without_one_action():
+    import asyncio
+    import pytest
+    from qsys_mcp import runtime
+    with pytest.raises(ValueError) as e:
+        asyncio.run(runtime.run_scenario(None, None, "x.qsys", [{"set": {}, "wait": 1}, {"label": "nothing"}]))
+    assert "steps[0]" in str(e.value) and "steps[1]" in str(e.value)
+
+
+def test_scenario_value_comparison():
+    from qsys_mcp.runtime import _close_enough
+    assert _close_enough(1.0, True, 1e-3) and not _close_enough(0.0, True, 1e-3)
+    assert _close_enough(-6.0004, -6, 1e-3) and not _close_enough(-5.9, -6, 1e-3)
+    assert _close_enough("Manual", "Manual", 0) and not _close_enough(None, 0, 1)
+
+
+def test_edit_validates_ops(tmp_path):
+    import pytest
+    from qsys_mcp import designs
+    f = tmp_path / "x.qsys"
+    f.write_bytes(b"")
+    with pytest.raises(designs.SpecError) as e:
+        designs.edit(str(f), [{"op": "explode"}, {"op": "add_component", "component": {"name": "bad name"}},
+                              {"op": "set_lua", "component": "TC", "lua": "if then"}])
+    text = str(e.value)
+    assert "ops[0]: op must be one of" in text and "ops[1]: the new component needs a valid name" in text
+    assert "ops[2]: Lua syntax error" in text

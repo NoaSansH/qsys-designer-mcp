@@ -13,11 +13,19 @@ An MCP server that lets Claude, or any other MCP client, build Q-SYS designs. Yo
   - Core and inventory I/O: Flex, Mic/Line, USB audio and HID, Software Dante, AES67
   - wires, by pin number or pin name
   - stored control values
-  - Text Controllers with your Lua and custom controls
-  - multi-page schematics and multi-page UCIs
+  - Text Controllers with your Lua, custom controls and control pins
+  - USB bridges of the Core and of I/O-USB Bridges (Speakerphone, soundcard, video), cameras and Design Properties
+  - control pins on any block, and installed schematic plugins
+  - signal names, on wires or instead of wires
+  - notes and group boxes on the schematic
+  - snapshot banks with their Snapshot Controllers, and their contents (`record_snapshots`)
+  - multi-page schematics, and multi-page UCIs with their size, frames and headers
+  - automatic layout along the signal flow, with zones and notes
 - **Look things up.** `probe_components` tells you a component class's properties, pins and controls, and what I/O a Core offers. Claude doesn't have to guess names.
+- **Edit a saved design** operation by operation (`edit_design`): move, rewire, set a value or a plugin's IP, add or remove blocks, without rebuilding and without losing snapshot contents.
 - **Read any design back,** including ones it didn't build: components, properties, stored values, pins, wires and UCIs.
 - **Check signal flow statically** over the real wiring, for example "mic 1 reaches the USB send", "the laptop never reaches the far end", "the echo canceller's reference carries the far end", or "no unconnected pins".
+- **Check in Designer and test scenarios.** `designer_check` runs Designer's Check Design; `run_scenario` emulates and checks control state step by step (recall a snapshot, expect values).
 - **Emulate and test.** It opens a test copy in Designer's emulator with every block visible to QRC, then reads and sets controls to test modes, mutes and script logic.
 - **Calibrate stored values.** It measures what the engine actually loads for each stored value and fixes the file if needed (more on why below).
 
@@ -100,7 +108,7 @@ Designer has no public API for editing designs. It does ship as a .NET program, 
 
 Each tool call runs the helper once with a JSON request. Nothing from QSC is included in this repo or the package.
 
-The Designer app itself is only used to run designs: opening, emulating, stopping, answering dialogs and taking screenshots. Menus and dialog buttons are pressed through Windows UI Automation, so the server never moves your mouse or types. Designer opens every file in its own window, so `open_design` and `emulate_design` close the running Designer first, so there's only ever one open. If a design has unsaved changes, they stop and say so instead.
+The Designer app itself is only used to run designs: opening, emulating, stopping, answering dialogs and taking screenshots. Menus and dialog buttons are pressed through Windows UI Automation, so the server doesn't move your mouse or type. The one exception is `screenshot` with a `view`: Designer's Design Elements panel has no UI Automation, so opening a page or a UCI takes a click, and only while Designer is the window in front (otherwise it stops and says so). Screenshots are likewise refused when Designer isn't in front, so another application is never captured. Designer opens every file in its own window, so `open_design` and `emulate_design` close the running Designer first, so there's only ever one open. If a design has unsaved changes, they stop and say so instead.
 
 ### Stored values
 
@@ -131,10 +139,10 @@ Because it relies on undocumented internals, any Designer update could break it.
 | Area | Tools |
 |---|---|
 | Learn | `designer_versions`, `probe_components` |
-| Build and check | `build_design`, `read_design`, `check_design` |
+| Build, edit and check | `build_design`, `edit_design`, `read_design`, `check_design`, `designer_check`, `learn_block_sizes` |
 | Run | `designer_status`, `open_design`, `close_design`, `emulate_design`, `stop_emulation`, `list_dialogs`, `dialog_button`, `screenshot` |
-| Stored values | `calibrate_values` |
-| Runtime (QRC) | `qrc_status`, `qrc_list_components`, `qrc_get_controls`, `qrc_set_control`, `qrc_named_controls`, `qrc_set_named_control`, `qrc_watch` |
+| Stored values and snapshots | `calibrate_values`, `record_snapshots` |
+| Runtime (QRC) | `run_scenario`, `qrc_status`, `qrc_list_components`, `qrc_get_controls`, `qrc_set_control`, `qrc_named_controls`, `qrc_set_named_control`, `qrc_watch` |
 | Lua | `lua_check`, `new_plugin` |
 
 There are three resources, `qsys://spec-format`, `qsys://lua-api` and `qsys://design-guide`, plus a `review_design` prompt.
@@ -143,7 +151,9 @@ There are three resources, `qsys://spec-format`, `qsys://lua-api` and `qsys://de
 
 - Emulation has no audio. It can't prove that signal flows, that an AEC converges, or that a gate or limiter acts. Signal paths are checked from the wiring.
 - USB HID call control (Teams/Zoom mute sync) can't be tested in emulation, because the PC side can't be simulated.
-- Snapshots, named controls, signal-name blocks and plugins aren't part of the spec yet. Third-party plugins can't be placed.
+- Named controls aren't part of the spec yet. A plugin must be installed (or given as a `.qplug` file) to be placed.
+- Snapshot contents are recorded in emulation, so the controls they hold must be settable there.
+- Block sizes are Designer's own: a long label is cut, so keep labels short.
 - Designer must be in English. Only menu and dialog names depend on the language.
 - Tested on Designer 9.13.1 and 10.3.0. Other versions should work, but they use the same undocumented internals, so try them on a copy first.
 

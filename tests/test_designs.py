@@ -22,9 +22,31 @@ def test_validate_reports_problems():
     ], "wires": [["G1.out.1", "MISSING.in.1"], ["G1.in.1", "G1.out.1"]]}
     _, problems = designs.validate(spec)
     text = "\n".join(problems)
-    for expected in ("duplicate name G1", "'bad name'", "exactly one of 'class' or 'inventory'", "page 'Nope'",
+    for expected in ("duplicate name G1", "'bad name'", "exactly one of 'class', 'inventory' or 'plugin'", "page 'Nope'",
                      "script_access", "no component MISSING", "should look like NAME.out"):
         assert expected in text
+
+
+def test_validate_signal_names_graphics_and_banks():
+    spec = {"pages": ["A"], "components": [
+        {"name": "G1", "class": "gain"},
+        {"name": "MIX", "class": "mixer", "control_pins": "active"},
+        {"name": "PL", "plugin": "Some Plugin"},
+    ], "wires": [["G1.out.1", "MIX.in.1", "Signal 1"], {"from": "G1.out.1", "to": "MIX.in.2", "signal": "Signal 1"}],
+        "graphics": [{"type": "text", "text": "note"}, {"type": "circle"}, {"type": "group", "page": "Nope"}],
+        "snapshot_banks": [{"name": "Modes", "controls": [{"component": "MIX", "controls": ["input_1_output_1_mute"]},
+                                                          {"component": "GHOST", "controls": ["mute"]}],
+                            "controller": {"name": "G1"}},
+                           {"name": "Other", "controller": {"name": "Modes_2"}}],
+        "ucis": [{"name": "U", "pages": [{"name": "P", "elements": [{"component": "Modes_2", "control": "load_1"}]}]}]}
+    _, problems = designs.validate(spec)
+    text = "\n".join(problems)
+    for expected in ("MIX: control_pins must be a list", "type must be text or group", "page 'Nope'",
+                     "snapshot bank Modes: no component GHOST", "controller name 'G1' must be a new"):
+        assert expected in text
+    assert not any("wires" in p for p in problems)          # three-element wires and signal objects are fine
+    assert not any("PL:" in p for p in problems)            # plugin components need no class
+    assert not any("UCI" in p for p in problems)            # Snapshot Controllers can be used on UCIs
 
 
 def test_validate_inlines_lua_file(tmp_path):
