@@ -145,10 +145,16 @@ def _index(design: dict) -> dict:
     return {c["name"]: c for c in design["components"]}
 
 
-def diff(a: dict, b: dict, positions: bool = False) -> dict:
+def _internal_id(key: str) -> bool:
+    """Identifiers Designer makes up for each new block (a rebuilt design gets new ones)."""
+    return key in ("unique_name", "code_name", "bridge_video") or key.endswith("_id")
+
+
+def diff(a: dict, b: dict, positions: bool = False, snapshots_a: dict | None = None,
+         snapshots_b: dict | None = None) -> dict:
     """What changed from design a to design b: blocks added, removed or changed (class, label,
     Script Access, properties, stored values, signal names, optionally position), wires, signal
-    links, snapshot banks and UCIs."""
+    links, snapshot banks and UCIs; with both designs' snapshot contents, what each snapshot sets."""
     ia, ib = _index(a), _index(b)
     changed = []
     for n in sorted(set(ia) & set(ib)):
@@ -161,7 +167,7 @@ def diff(a: dict, b: dict, positions: bool = False) -> dict:
         for section in ("properties", "values"):
             sa, sb = ca.get(section, {}), cb.get(section, {})
             delta = {k: [sa.get(k), sb.get(k)] for k in sorted(set(sa) | set(sb))
-                     if k not in ("plugin_source",) and _plain(sa.get(k)) != _plain(sb.get(k))}
+                     if k != "plugin_source" and not _internal_id(k) and _plain(sa.get(k)) != _plain(sb.get(k))}
             if delta:
                 d[section] = delta
         pa = {f"{p['dir']}.{p['index']}": p.get("signal") for p in ca.get("pins", [])}
@@ -174,6 +180,17 @@ def diff(a: dict, b: dict, positions: bool = False) -> dict:
     ba, bb = {x["name"]: x for x in a.get("snapshot_banks", [])}, {x["name"]: x for x in b.get("snapshot_banks", [])}
     banks = {n: {k: [ba[n].get(k), bb[n].get(k)] for k in ("count", "controller", "controls", "saved_snapshots")
                  if ba[n].get(k) != bb[n].get(k)} for n in set(ba) & set(bb)}
+    values = {}
+    if snapshots_a is not None and snapshots_b is not None:
+        for bank in sorted(set(snapshots_a) | set(snapshots_b)):
+            sa, sb = snapshots_a.get(bank, {}), snapshots_b.get(bank, {})
+            for n in sorted(set(sa) | set(sb), key=int):
+                va, vb = sa.get(n, {}), sb.get(n, {})
+                d = {k: [va.get(k), vb.get(k)] for k in sorted(set(va) | set(vb)) if va.get(k) != vb.get(k)}
+                if d:
+                    values.setdefault(bank, {})[n] = d
+        for bank in values:
+            banks.setdefault(bank, {})
     ua = {u["name"]: sum(len(p.get("elements", [])) for p in u.get("pages", [])) for u in a.get("ucis", [])}
     ub = {u["name"]: sum(len(p.get("elements", [])) for p in u.get("pages", [])) for u in b.get("ucis", [])}
     return {
@@ -182,8 +199,9 @@ def diff(a: dict, b: dict, positions: bool = False) -> dict:
         "connections_added": sorted(wb - wa), "connections_removed": sorted(wa - wb),
         "banks_added": sorted(set(bb) - set(ba)), "banks_removed": sorted(set(ba) - set(bb)),
         "banks_changed": {n: d for n, d in banks.items() if d},
+        **({"snapshot_values_changed": values} if snapshots_a is not None and snapshots_b is not None else {}),
         "ucis": {n: [ua.get(n), ub.get(n)] for n in sorted(set(ua) | set(ub)) if ua.get(n) != ub.get(n)},
-        "same": not (set(ia) ^ set(ib) or changed or wa ^ wb or set(ba) ^ set(bb) or any(banks.values())),
+        "same": not (set(ia) ^ set(ib) or changed or wa ^ wb or set(ba) ^ set(bb) or any(banks.values()) or values),
     }
 
 

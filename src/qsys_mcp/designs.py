@@ -121,6 +121,9 @@ def validate(spec: dict, base_dir: str | Path | None = None) -> tuple[dict, list
             names.add(code)
     for u in spec.get("ucis", []):
         problems += _uci_size_problems(u)
+        if u.get("navigation", "None") not in UCI_NAVIGATION:
+            problems.append(f"UCI {u.get('name')}: navigation must be one of {', '.join(UCI_NAVIGATION)}")
+        titles = [p.get("name") for p in u.get("pages", [])]
         for p in u.get("pages", []):
             for j, e in enumerate(p.get("elements", [])):
                 where = f"UCI {u.get('name')}/{p.get('name')} element {j}"
@@ -128,11 +131,50 @@ def validate(spec: dict, base_dir: str | Path | None = None) -> tuple[dict, list
                 if kind == "control":
                     if e.get("component") not in names:
                         problems.append(f"{where}: no component {e.get('component')}")
+                    for k in [k for k in e if k.startswith("image_")]:
+                        problems += _load_image(e, k, where, base_dir)
                 elif kind in ("group_box", "header"):
                     problems += _graphic_problems(where, kind, e)
+                elif kind == "image":
+                    problems += _load_image(e, None, where, base_dir)
+                elif kind == "page_link":
+                    if e.get("page") not in titles:
+                        problems.append(f"{where}: page_link to {e.get('page')!r}, which is not a page of this UCI ({titles})")
                 elif kind != "text":
-                    problems.append(f"{where}: type must be control, text, group_box or header, not {kind!r}")
+                    problems.append(f"{where}: type must be control, text, group_box, header, image or page_link, not {kind!r}")
     return spec, problems
+
+
+IMAGE_TYPES = {".png": "png", ".jpg": "jpg", ".jpeg": "jpg", ".gif": "gif", ".bmp": "bmp", ".svg": "svg"}
+UCI_NAVIGATION = ("None", "Left", "Right", "Top", "Bottom")
+
+
+def _load_image(e: dict, key: str | None, where: str, base_dir) -> list[str]:
+    """An image given as "file" (or a button's image_on: "file.png") becomes {"data": base64, "format"}."""
+    import base64
+    src = e.get("file") if key is None else e[key]
+    if key is not None and isinstance(src, dict) and "data" in src:
+        return []
+    if key is None and "data" in e and not src:
+        return []
+    if not isinstance(src, str):
+        return [f"{where}: give the image as a file path"]
+    f = Path(src)
+    if not f.is_absolute() and base_dir:
+        f = Path(base_dir) / f
+    fmt = IMAGE_TYPES.get(f.suffix.lower())
+    if fmt is None:
+        return [f"{where}: {f.name}: images can be {', '.join(sorted(IMAGE_TYPES))}"]
+    try:
+        data = base64.b64encode(f.read_bytes()).decode()
+    except OSError as err:
+        return [f"{where}: cannot read {f}: {err}"]
+    if key is None:
+        e.pop("file", None)
+        e.update({"data": data, "format": fmt})
+    else:
+        e[key] = {"data": data, "format": fmt}
+    return []
 
 
 def _is_int(v) -> bool:

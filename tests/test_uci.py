@@ -37,7 +37,7 @@ def test_validate_reports_uci_problems():
     text = "\n".join(designs.validate(s)[1])
     for expected in ("give both width and height, or neither", "width must be a whole number of pixels from 100 to 8192, not 64",
                      "height must be a whole number of pixels from 100 to 8192, not 800.0",
-                     "type must be control, text, group_box or header, not 'frame'",
+                     "type must be control, text, group_box, header, image or page_link, not 'frame'",
                      "a header has no fill, stroke_width (a group_box does)", "color must be a colour like #AARRGGBB, not 'white'",
                      "stroke_width must be a whole number of pixels, not 1.5", "bold must be true or false", "align must be Left, Center or Right",
                      "w must be more than zero", "corner_radius must be zero or more", "x must be a number", "text must be a string",

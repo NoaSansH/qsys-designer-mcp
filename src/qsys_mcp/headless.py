@@ -1,8 +1,10 @@
 """Headless access to Q-SYS Designer's own libraries.
 
 The C# helper in `helper/` is compiled on first use against the Designer version being used
-(with the .NET Framework compiler that ships with Windows) and cached per version. Each call
-runs it once with a JSON request and reads back a JSON response. Nothing from QSC is shipped.
+(with the .NET Framework compiler that ships with Windows) and cached per version. A JSON request
+goes in and a JSON response comes back. One helper process per Designer version stays open and takes
+the requests in turn, so Designer's libraries load once (QSYS_MCP_PERSISTENT=0 runs one process per
+request instead). Nothing from QSC is shipped.
 """
 
 from __future__ import annotations
@@ -10,10 +12,15 @@ from __future__ import annotations
 import ctypes
 import hashlib
 import json
+import atexit
 import os
+import queue
 import re
+import shutil
 import subprocess
 import tempfile
+import threading
+import time
 from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
@@ -223,10 +230,112 @@ def helper_exe(inst: Install) -> Path:
     return exe
 
 
+DONE_MARK = "##qhelper-done"
+RECYCLE_AFTER = 40          # requests before a serving helper is restarted (Designer keeps some state)
+_workers: dict[str, "_Worker"] = {}
+_workers_lock = threading.Lock()
+
+
+def persistent() -> bool:
+    return os.environ.get("QSYS_MCP_PERSISTENT", "1") != "0"
+
+
+class _Worker:
+    """A helper process serving requests for one Designer version, one at a time."""
+
+    def __init__(self, inst: Install, exe: Path) -> None:
+        self.exe, self.lock, self.served = exe, threading.Lock(), 0
+        self.tmp = tempfile.mkdtemp(prefix="qsys-mcp-serve-")
+        self.proc = subprocess.Popen([str(exe), str(inst.folder), "--serve"], stdin=subprocess.PIPE,
+                                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8",
+                                     errors="replace", cwd=self.tmp, creationflags=subprocess.CREATE_NO_WINDOW)
+        self.lines: queue.Queue = queue.Queue()
+        threading.Thread(target=self._read, daemon=True).start()
+
+    def _read(self) -> None:
+        for line in self.proc.stdout:
+            self.lines.put(line.rstrip("\r\n"))
+        self.lines.put(None)
+
+    def alive(self) -> bool:
+        return self.proc.poll() is None
+
+    def stop(self) -> None:
+        try:
+            self.proc.stdin.close()
+            self.proc.wait(5)
+        except Exception:
+            self.proc.kill()
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def call(self, request: dict, timeout: float) -> tuple[Path | None, str]:
+        """(response file, helper output); the file is None if the helper died or timed out."""
+        n = self.served = self.served + 1
+        req, resp = Path(self.tmp) / f"request{n}.json", Path(self.tmp) / f"response{n}.json"
+        req.write_text(json.dumps(request), encoding="utf-8")
+        self.proc.stdin.write(f"{req}\t{resp}\n")
+        self.proc.stdin.flush()
+        log, deadline = [], time.monotonic() + timeout
+        while True:
+            try:
+                line = self.lines.get(timeout=max(0.1, deadline - time.monotonic()))
+            except queue.Empty:
+                self.proc.kill()
+                raise HelperError(f"Helper timed out after {timeout:.0f} s ({request.get('command')})")
+            if line is None:
+                return None, "\n".join(log)
+            if line == DONE_MARK:
+                req.unlink(missing_ok=True)
+                return resp, "\n".join(log)
+            log.append(line)
+
+
+def _serve(request: dict, inst: Install, exe: Path, timeout: float) -> dict | None:
+    """The response from this version's serving helper, or None if it could not answer (it is then
+    restarted next time and this request runs on its own)."""
+    with _workers_lock:
+        w = _workers.get(inst.version)
+        if w is None or not w.alive() or w.exe != exe or w.served >= RECYCLE_AFTER:
+            if w is not None:
+                w.stop()
+            try:
+                w = _workers[inst.version] = _Worker(inst, exe)
+            except OSError:
+                return None
+    with w.lock:
+        if not w.alive():
+            return None
+        resp, log = w.call(request, timeout)
+        if resp is None or not resp.is_file():
+            return None
+        out = json.loads(resp.read_text(encoding="utf-8-sig"))
+        resp.unlink(missing_ok=True)
+        return out
+
+
+@atexit.register
+def stop_workers() -> None:
+    with _workers_lock:
+        for w in _workers.values():
+            w.stop()
+        _workers.clear()
+
+
 def run(request: dict, inst: Install | None = None, timeout: float = 300) -> dict:
     """Run one helper command and return its response (raises HelperError on failure)."""
     inst = inst or pick()
     exe = helper_exe(inst)
+    out = _serve(request, inst, exe, timeout) if persistent() else None
+    if out is None:
+        out = _run_once(request, inst, exe, timeout)
+    if not out.get("ok"):
+        raise HelperError(out.get("error", "unknown helper error"))
+    out.pop("ok", None)
+    out["designer"] = inst.version
+    return out
+
+
+def _run_once(request: dict, inst: Install, exe: Path, timeout: float) -> dict:
     with tempfile.TemporaryDirectory(prefix="qsys-mcp-") as tmp:
         req, resp = Path(tmp) / "request.json", Path(tmp) / "response.json"
         req.write_text(json.dumps(request), encoding="utf-8")
@@ -237,12 +346,7 @@ def run(request: dict, inst: Install | None = None, timeout: float = 300) -> dic
             raise HelperError(f"Helper timed out after {timeout:.0f} s ({request.get('command')})") from e
         if not resp.is_file():
             raise HelperError(f"Helper crashed ({request.get('command')}): exit {r.returncode}\n{r.stdout[-2000:]}\n{r.stderr[-2000:]}")
-        out = json.loads(resp.read_text(encoding="utf-8-sig"))
-    if not out.get("ok"):
-        raise HelperError(out.get("error", "unknown helper error"))
-    out.pop("ok", None)
-    out["designer"] = inst.version
-    return out
+        return json.loads(resp.read_text(encoding="utf-8-sig"))
 
 
 # ---- calibrated positions -------------------------------------------------------------

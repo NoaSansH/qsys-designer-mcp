@@ -120,7 +120,7 @@ Notes and group boxes on the schematic:
 
 - Creates the bank (Snapshots panel) with the listed controls, or with every control of a component (`all`).
 - `controller` places its Snapshot Controller on the schematic under that code name, usable by Lua, QRC and UCIs (`load_1`, `save_1`...). `mode` is `Normal`, `WriteProtect` or `Scene`.
-- The bank starts empty. Snapshot contents are written by the engine, not stored as control values: fill them with `record_snapshots`, which saves each snapshot in emulation and copies the result into the design. `read_design` shows which snapshots of each bank hold data.
+- The bank starts empty. Snapshot contents are written by the engine, not stored as control values: fill them with `record_snapshots`, which saves each snapshot in emulation and copies the result into the design. `read_design` shows which snapshots of each bank hold data, and `read_snapshots` what each one sets, read straight from the file (no emulation).
 
 ## ucis
 
@@ -138,7 +138,11 @@ Notes and group boxes on the schematic:
 ```
 
 - `width` and `height` set the UCI's size in pixels. Give both, or neither to keep Designer's default. When they change the size, the builder also sets the panel type to Custom, the orientation (portrait when `height` is more than `width`) and the aspect ratio that matches, e.g. 16:10 for 1280 × 800. `build_design` reports the size each UCI ended up with under `uci_sizes`.
-- Element `type`s are `control` (the default), `text`, `group_box` (a frame with an optional title) and `header` (a title with a line).
+- Element `type`s are `control` (the default), `text`, `group_box` (a frame with an optional title), `header` (a title with a line), `image` and `page_link`.
+- `navigation` on the UCI shows Q-SYS's page tabs: `None`, `Left`, `Right`, `Top` or `Bottom`, with `tab_style` (`Classic` or `Chevron`), `navigation_size` (the bar's width in pixels), `navigation_font_size`, `swipe` (swiping between pages, default on) and `activity_timeout`. The bar is drawn over the page: start the page's elements after it (e.g. `x` from `navigation_size` + 20 with `Left`).
+- `image`: `{"type": "image", "file": "logo.png", "x", "y", "w", "h"}`, PNG, JPG, GIF, BMP or SVG, the path relative to `spec_dir`. The picture is saved inside the design.
+- `page_link`: `{"type": "page_link", "page": "Audio", "text": "Audio settings", "x", "y", "w", "h", "font_size", "color"}`, a touch area that opens another page of the same UCI.
+- A button can be drawn with pictures: `image_on`, `image_off` (and `image_pressed_on`, `image_pressed_off`) take image files.
 - `group_box` and `header` take `x`, `y`, `w`, `h`, `text`, `font_size`, `bold`, `color` (the text colour) and `align` (`Left`, `Center` or `Right`). A `group_box` also takes `fill`, `stroke`, `stroke_width` (whole pixels) and `corner_radius`. Leave a key out to keep Designer's default; without `text` there's no title.
 - `style` values include `Button`, `Knob`, `Fader`, `Text`, `Meter` and `Led`. If you leave it out, the control's default style is used.
 - Colours are `#AARRGGBB`.
@@ -167,7 +171,7 @@ A template is a JSON file holding part of a spec (components, wires, signals, gr
 - `${NAME}` in the template is replaced by the param's value (a string that is only `${NAME}` keeps the value's type).
 - The template's blocks, banks, controllers, named controls, UCIs and signal names get the prefix; wire and signal endpoints follow, and endpoints to blocks outside the template keep their names.
 - Positions move by `dx`/`dy`; `page` puts everything on that page (added to `pages`). File paths are relative to the including spec's folder (`spec_dir`); templates can include templates.
-- A template block with `"shared": true` keeps its name and is placed once, however many times the template is included (a Core's Flex Out used by several zones): later copies only add their `values` and `control_pins` to it. A block of that name in the spec itself is used instead.
+- A template block with `"shared": true` keeps its name and is placed once, however many times the template is included (a Core's Flex Out used by several zones): later copies only add their `values` and `control_pins` to it. A block of that name in the spec itself is used instead. The templates share the Core's inputs as `FLEX_IN` and its outputs as `SPK`.
 - A template can also carry `inventory` (added once per name), `core` settings it needs (e.g. the USB bridge; the spec's own win), `zones` (prefixed with the include's prefix), and `description` / `param_help` for `list_templates`.
 
 The server comes with ready-made templates, listed with their params by `list_templates` and included by name:
@@ -182,6 +186,8 @@ The server comes with ready-made templates, listed with their params by `list_te
 | `conference_usb_dante_mic` | PC on the Core's USB speakerphone bridge, a Dante ceiling mic that cancels echo itself, mic mute and meter, 2 x 3 matrix, volume, EQ, limiter, the final speaker feed back to the mic as its AEC reference |
 | `conference_core_aec` | two Flex mics into a 2-channel AEC (reference = final speaker feed), automixer, mic mute and meter, PC on USB, 2 x 3 matrix, volume, EQ, limiter |
 | `speaker_zone` | a 3-source stereo selector, zone volume, EQ and limiter to two output channels; once per zone with a prefix |
+| `divisible_room` | two rooms and a movable wall: each room's source to its speakers, both to both with the wall open (a 2 x 2 matrix driven by a Text Controller, `WALL.WallOpen`); give `PREFIX` the include's prefix |
+| `paging_bgm` | music in two zones, ducked while the paging mic speaks; the page goes to the zones opened on `PAGE_ROUTE`; zone volume and limiter |
 
 Each builds with 0 Check Design errors and passes `audit_design`. Room-level values (EQ, Max Level, preamp gain) are left for the site.
 
@@ -237,10 +243,13 @@ Other checks and documents:
 - `check_contract` checks what a control system or a script expects of the design: blocks by code name, Script Access (`qrc`, `script` or `both`) and the controls read or written. `list_controls` lists every control of the blocks.
 - `check_simpl` builds that contract from a Crestron SIMPL program (`.smw`) and its Q-SYS modules' `.usp` files (QscQsys library: Fader, Meter, Camera, Snapshot Controller, Generic Component Control), then checks it: each module instance's component name, and the controls it uses (for a camera, only the joins wired in the program). Other modules can be described with `modules`.
 - `audit_design` looks for what makes a room unusable: a mic reaching the speakers (feedback), a PC getting its own audio back, an AEC reference taken before the room volume, blocks with no connection, limiter thresholds above 0 dBFS, high stored gains, blocks open to QRC. Paths follow the wires and signal names through each block in its state (muted or -100 dB crosspoints, muted gains), in the stored values and, with `with_snapshots`, in every snapshot. `roles` names the mics, speakers, PC links, AEC reference and volume when the inferred ones aren't right.
-- `document_design` writes an HTML document of the design (inventory, blocks and settings, wires and signal names, snapshot banks and, with `with_snapshot_values`, what each snapshot sets, UCIs, notes). `compare_designs` lists what changed between two versions.
+- `document_design` writes an HTML document of the design (inventory, blocks and settings, wires and signal names, snapshot banks and, with `with_snapshot_values`, what each snapshot sets, UCIs, notes). `compare_designs` lists what changed between two versions, including what each snapshot sets.
+- `read_snapshots` gives what every saved snapshot sets, read from the file without Designer: `{bank: {"1": {"BLOCK.control": value}}}`.
 - `make_test_uci` adds a test UCI generated from the design: snapshot buttons, meters, gains and mutes, Text Controller states.
-- `lua_test` runs a Text Controller's script outside Designer against simulated Controls, other blocks and timers.
+- `lua_test` runs a Text Controller's script, or a plugin (`plugin_file`), outside Designer against simulated Controls, other blocks, timers, TcpSocket / UdpSocket (steps `socket` / `udp` deliver the device's data, `expect` `sent` checks what was written), HttpClient (replies given in `http`), rapidjson / json, System, Notifications and Uci.
 
 `designer_check` runs Designer's own Check Design and returns its errors, warnings and the licences the design needs.
+
+On a real Core (after `qrc_connect`): `compare_with_core` says which design it runs and compares every stored value with it; `pull_core_snapshots` reads the snapshots saved on site (recalling each one, then putting the controls back) and, with `out_path`, records them into a copy of the design. Recalling snapshots changes a live room, so it needs `allow_changes`. `send_to_core` and `load_from_core` drive Designer's File > Save to Core & Run and Load from Core & Connect, only with `confirm=True`; Designer finds the Core by the design's Core name.
 
 For control logic, write a `run_scenario`: it emulates a test copy and runs steps such as `{"load": {"controller": "MODES", "snapshot": 3}}` then `{"expect": {"component": "MIC_MUTE", "control": "mute", "value": false}}`, and reports each expectation. `emulate_design` and the `qrc_*` tools are there for exploring by hand. Emulation has no audio: it can test control state, but not whether sound actually gets through.

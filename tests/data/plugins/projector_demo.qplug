@@ -1,0 +1,79 @@
+-- A small projector plugin for the tests: TCP control with polling, and an HTTP status read in JSON.
+PluginInfo = { Name = "Demo~Projector", Version = "1.0", BuildVersion = "1.0.0.1", Id = "demo.projector.test", Author = "tests" }
+
+function GetColor(props) return { 102, 102, 102 } end
+function GetPrettyName(props) return "Demo projector " .. PluginInfo.Version end
+
+function GetProperties()
+  return {
+    { Name = "Inputs", Type = "integer", Min = 1, Max = 4, Value = 2 },
+    { Name = "Poll Interval", Type = "integer", Min = 1, Max = 60, Value = 5 },
+  }
+end
+
+function GetControls(props)
+  return {
+    { Name = "IP Address", ControlType = "Text", Count = 1, UserPin = true, PinStyle = "Input" },
+    { Name = "Power", ControlType = "Button", ButtonType = "Toggle", Count = 1, UserPin = true, PinStyle = "Both" },
+    { Name = "Input", ControlType = "Button", ButtonType = "Trigger", Count = props["Inputs"].Value, UserPin = true, PinStyle = "Input" },
+    { Name = "Connected", ControlType = "Indicator", IndicatorType = "Led", Count = 1, UserPin = true, PinStyle = "Output" },
+    { Name = "Lamp Hours", ControlType = "Indicator", IndicatorType = "Text", Count = 1 },
+  }
+end
+
+function GetControlLayout(props)
+  local layout, graphics = {}, {}
+  layout["IP Address"] = { PrettyName = "Setup~IP", Style = "Text", Position = { 10, 10 }, Size = { 100, 16 } }
+  layout["Power"] = { PrettyName = "Power", Style = "Button", Position = { 10, 30 }, Size = { 50, 16 } }
+  for i = 1, props["Inputs"].Value do
+    layout["Input " .. i] = { PrettyName = "Input~" .. i, Style = "Button", Position = { 10 + 40 * i, 50 }, Size = { 36, 16 } }
+  end
+  layout["Connected"] = { PrettyName = "Connected", Style = "Led", Position = { 70, 30 }, Size = { 16, 16 } }
+  layout["Lamp Hours"] = { PrettyName = "Lamp hours", Style = "Text", Position = { 10, 70 }, Size = { 60, 16 } }
+  return layout, graphics
+end
+
+if Controls then
+  local json = require("rapidjson")
+  local sock = TcpSocket.New()
+  local poll = Timer.New()
+
+  local function send(cmd) if sock.IsConnected then sock:Write(cmd .. "\r") end end
+
+  sock.EventHandler = function(s, evt, err)
+    if evt == TcpSocket.Events.Connected then
+      Controls.Connected.Boolean = true
+      send("PWR?")
+    elseif evt == TcpSocket.Events.Data then
+      local line = s:ReadLine(TcpSocket.EOL.Any)
+      while line do
+        local state = line:match("^PWR=(%u+)")
+        if state then Controls.Power.Boolean = state == "ON" end
+        line = s:ReadLine(TcpSocket.EOL.Any)
+      end
+    elseif evt == TcpSocket.Events.Closed or evt == TcpSocket.Events.Error then
+      Controls.Connected.Boolean = false
+    end
+  end
+
+  local function status()
+    HttpClient.Download({ Url = "http://" .. Controls["IP Address"].String .. "/api/status", Timeout = 5,
+      EventHandler = function(t, code, data)
+        if code == 200 then
+          local s = json.decode(data)
+          if s then Controls["Lamp Hours"].String = tostring(s.lamp.hours) end
+        end
+      end })
+  end
+
+  local function connect()
+    if Controls["IP Address"].String ~= "" then sock:Connect(Controls["IP Address"].String, 4352) end
+  end
+
+  Controls["IP Address"].EventHandler = function() sock:Disconnect(); connect(); status() end
+  Controls.Power.EventHandler = function(c) send(c.Boolean and "PWR ON" or "PWR OFF") end
+  for i, c in ipairs(Controls.Input) do c.EventHandler = function() send("INPUT " .. i) end end
+  poll.EventHandler = function() send("PWR?") end
+  poll:Start(Properties["Poll Interval"].Value)
+  connect()
+end

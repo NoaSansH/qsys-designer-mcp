@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import functools
 import os
+from pathlib import Path
 from importlib import resources
 from typing import Any
 
@@ -186,18 +187,19 @@ def check_simpl(design_path: str, smw_path: str, usp_dirs: list[str] | None = No
     return r
 
 
-@tool(APP_SAFE)
-async def audit_design(path: str, roles: dict | None = None, with_snapshots: bool = False, discard_changes: bool = False) -> dict:
+@tool(READ_ONLY)
+def audit_design(path: str, roles: dict | None = None, with_snapshots: bool = True) -> dict:
     """Review a design for the mistakes that make a room unusable: a microphone reaching the loudspeakers
     (feedback), a PC getting its own audio back (echo, loop), an AEC reference not taken after the room
     volume, blocks with no connection, limiter thresholds above 0 dBFS, high stored gains, blocks open to
     QRC. Paths follow the wiring through each block in its state: muted or -100 dB crosspoints and muted
-    gains stop them. with_snapshots also checks every saved snapshot (emulates a test copy). roles, when
+    gains stop them. with_snapshots also checks every saved snapshot (read from the file). roles, when
     the inferred ones aren't right: {"mics": [...], "speakers": [...], "pc_links": [[in, out]],
     "aec_reference": "BLOCK.in.N", "volume": "BLOCK"} (blocks or pins)."""
-    from qsys_mcp import audit
-    values = await runtime.snapshot_contents(designer, emulator, path, discard_changes) if with_snapshots else None
-    return audit.audit(designs.read(path), roles, values)
+    from qsys_mcp import audit, snapshotdata
+    design = designs.read(path)
+    values = snapshotdata.contents(path, design) if with_snapshots else None
+    return audit.audit(design, roles, values)
 
 
 @tool(READ_ONLY)
@@ -209,29 +211,43 @@ def list_controls(path: str, components: list[str] | None = None) -> dict:
 
 
 @tool(WRITES_FILE)
-async def document_design(path: str, out_html: str, title: str | None = None, lang: str = "fr",
+def document_design(path: str, out_html: str, title: str | None = None, lang: str = "fr",
                           with_snapshot_values: bool = False, overwrite: bool = False) -> dict:
     """Write a self-contained HTML document of a saved design: inventory, blocks with properties and
     stored values, wires and signal names, snapshot banks, UCIs and notes. lang is fr or en.
-    with_snapshot_values also lists what every saved snapshot sets (emulates a test copy, which closes
-    any running Designer first)."""
-    from qsys_mcp import report
+    with_snapshot_values also lists what every saved snapshot sets (read from the file)."""
+    from qsys_mcp import report, snapshotdata
     if os.path.exists(out_html) and not overwrite:
         raise FileExistsError(f"{out_html} exists; pass overwrite=True to replace it")
-    values = await runtime.snapshot_contents(designer, emulator, path, True) if with_snapshot_values else None
-    page = report.document(designs.read(path), title, lang, values)
+    design = designs.read(path)
+    values = snapshotdata.contents(path, design) if with_snapshot_values else None
+    page = report.document(design, title, lang, values)
     with open(out_html, "w", encoding="utf-8") as fh:
         fh.write(page)
     return {"path": os.path.abspath(out_html), "bytes": len(page.encode("utf-8")), "snapshot_values": bool(values)}
 
 
 @tool(READ_ONLY)
-def compare_designs(path_a: str, path_b: str, positions: bool = False) -> dict:
+def compare_designs(path_a: str, path_b: str, positions: bool = False, snapshot_values: bool = True) -> dict:
     """What changed from design A to design B: blocks added, removed or changed (class, label, Script
     Access, properties, stored values, signal names, and positions if asked), connections, snapshot
-    banks and UCIs. Snapshot contents are compared by which snapshots hold data, not by value."""
-    from qsys_mcp import report
-    return report.diff(designs.read(path_a), designs.read(path_b), positions)
+    banks, what each snapshot sets (snapshot_values, read from the files) and UCIs. Identifiers Designer
+    makes up for each block are left out."""
+    from qsys_mcp import report, snapshotdata
+    a, b = designs.read(path_a), designs.read(path_b)
+    sa = snapshotdata.contents(path_a, a) if snapshot_values else None
+    sb = snapshotdata.contents(path_b, b) if snapshot_values else None
+    return report.diff(a, b, positions, sa, sb)
+
+
+@tool(READ_ONLY)
+def read_snapshots(path: str, banks: list[str] | None = None) -> dict:
+    """What every saved snapshot of a design sets, read straight from the file (no Designer window, no
+    emulation): {bank: {"1": {"BLOCK.control": value}}}, numbers as numbers (gains in dB, mutes 0/1,
+    selections), text as text. Works on any design, including snapshots saved on site and pulled back."""
+    from qsys_mcp import snapshotdata
+    out = snapshotdata.contents(path)
+    return {b: v for b, v in out.items() if not banks or b in banks}
 
 
 @tool(WRITES_FILE)
@@ -365,14 +381,38 @@ def dialog_button(button: str) -> str:
 @tool(READ_ONLY, image=True)
 def screenshot(view: str | None = None, name: str | None = None, page: str | None = None,
                save_to: str | None = None) -> Image:
-    """Picture of the Designer window (brought to the front). The image is sent to the model.
-    view='schematic' (name = page title) or view='uci' (name = UCI, optional page) first opens that
-    page fitted to the window; this clicks Designer's Design Elements panel, which has no UI Automation.
+    """Picture of the Designer window, drawn from the window itself: Designer can stay behind other
+    windows. The image is sent to the model. view='schematic' (name = page title) or view='uci' (name =
+    UCI, optional page) first shows that page fitted to the window; opening a page other than the one
+    shown, or a UCI, clicks Designer's Design Elements panel (no UI Automation there), so Designer is
+    brought to the front for that click. preview_design draws a page without Designer at all.
     In Designer 10.5 the View zoom commands don't reach the UCI editor, so a UCI shows at 100 %.
     save_to also writes the PNG to that path."""
     if view:
         designer.show_view(view, name or "", page)
     data = designer.screenshot()
+    if save_to:
+        with open(save_to, "wb") as fh:
+            fh.write(data)
+    return Image(data=data, format="png")
+
+
+@tool(READ_ONLY, image=True)
+def preview_design(path: str, view: str = "schematic", name: str | None = None, page: str | None = None,
+                   save_to: str | None = None) -> Image:
+    """Picture of a schematic page (view='schematic', name = page title, default the first) or a UCI page
+    (view='uci', name = UCI, page) drawn from the saved file, without Designer: blocks with their labels,
+    pins and signal names, wires (links made by signal name only are shown as their names), group boxes
+    and notes; UCI buttons, faders, meters, knobs, LEDs, texts and group boxes. Close to Designer's
+    drawing, not identical (pins are spread evenly): for checking a layout. save_to also writes the PNG."""
+    from qsys_mcp import layout, preview
+    design = designs.read(path)
+    if view == "schematic":
+        data = preview.schematic(design, name, layout.load_sizes(headless.pick(for_file=path)))
+    elif view == "uci":
+        data = preview.uci(design, name, page)
+    else:
+        raise ValueError("view must be 'schematic' or 'uci'")
     if save_to:
         with open(save_to, "wb") as fh:
             fh.write(data)
@@ -393,16 +433,29 @@ def designer_check(path: str | None = None, discard_changes: bool = False) -> di
 
 @tool(READ_ONLY)
 def lua_test(steps: list[dict], code: str | None = None, controls: list[dict] | None = None,
-             path: str | None = None, component: str | None = None) -> dict:
-    """Run a Text Controller script outside Designer, in a real Lua interpreter, against simulated
-    Controls, Component.New, Timer (on a simulated clock), NamedControl and print. Give `code` and its
-    `controls` (as in a spec's text_controller), or `path` + `component` to take both from a design.
-    Steps: {"set": {"control" | "component"+"control", "value"}} (fires EventHandlers, like a change
-    from outside), {"advance": seconds}, {"expect": {..., "value" | "string", "tolerance"?}}, each with an
-    optional "label". Needs Lua 5.3/5.4 (QSYS_LUA or lua on PATH)."""
+             path: str | None = None, component: str | None = None, plugin_file: str | None = None,
+             properties: dict | None = None, http: list[dict] | None = None, system: dict | None = None,
+             auto_connect: bool = True) -> dict:
+    """Run a Text Controller script, or a plugin's code, outside Designer in a real Lua interpreter,
+    against simulated Controls, Component.New, Timer (simulated clock), NamedControl, TcpSocket,
+    UdpSocket, HttpClient, require("rapidjson") / require("json"), System, Design, Notifications, Uci,
+    Crypto (Base64) and print. Give `code` and its `controls` (as in a spec's text_controller), or `path` +
+    `component` to take both from a design, or `plugin_file` (.qplug) with optional `properties`: the
+    plugin's design-time functions run first (properties, controls, layout: layout entries without a
+    control are reported), then its runtime code. Steps: {"set": {"control" | "component"+"control",
+    "value"}}, {"advance": seconds}, {"socket": {"to": "host:port", "data": "..." | "event": "Closed"}},
+    {"udp": {"data", "address", "port"}}, {"notify": {"name", "data"}}, {"expect": {..., "value" | "string"}}
+    or {"expect": {"sent": "PWR ON\r", "to": "host:port"}}, {"expect": {"connected": true}},
+    {"expect": {"request": "GET http://..."}}, {"expect": {"uci": "Panel", "page": "Home"}}, each with an
+    optional "label". http: simulated replies [{"url", "method"?, "code"?, "data" (text or object)}].
+    system: System fields, e.g. {"IsEmulating": false}. Needs Lua 5.3/5.4 (QSYS_LUA or lua on PATH)."""
     import json as _json
     from qsys_mcp import luatest
-    if path:
+    plugin = False
+    if plugin_file:
+        code = Path(plugin_file).read_text(encoding="utf-8")
+        plugin, controls = True, []
+    elif path:
         if not component:
             raise ValueError("give component with path")
         c = next((c for c in designs.read(path)["components"] if c["name"] == component), None)
@@ -415,7 +468,8 @@ def lua_test(steps: list[dict], code: str | None = None, controls: list[dict] | 
                          "max": x.get("Max", 1), "type": str(x.get("ControlType", "")).lower()} for x in specs]
     if not code:
         raise ValueError("no Lua code to test")
-    return luatest.run(code, controls or [], steps)
+    return luatest.run(code, controls or [], steps, http=http, system=system, plugin=plugin, properties=properties,
+                       auto_connect=auto_connect)
 
 
 @tool(READ_ONLY)
@@ -458,6 +512,66 @@ async def save_snapshot_live(controller: str, number: int, values: list[dict] | 
         await qrc.set(v["component"], v["control"], v["value"])
     await qrc.set(controller, f"save_{number}", 1)
     return {"host": qrc.host, "controller": controller, "saved": number, "values_set": len(values or [])}
+
+
+@tool(LIVE_READ)
+async def compare_with_core(path: str, components: list[str] | None = None) -> dict:
+    """Compare the Core the qrc_* tools point at (qrc_connect; the emulator by default) with a design file:
+    which design it runs (name and code), and every stored value of the file against the control on the
+    Core. Read only. Blocks whose Script Access keeps QRC out are listed, not compared."""
+    from qsys_mcp import live
+    return await live.compare(qrc, designs.read(path), components)
+
+
+@tool(LIVE_WRITE)
+async def pull_core_snapshots(path: str, banks: list[str] | None = None, numbers: list[int] | None = None,
+                              out_path: str | None = None, discard_changes: bool = False) -> dict:
+    """Bring snapshots made on site (camera positions, levels) back from the Core the qrc_* tools point
+    at: each snapshot of the design's banks is recalled in turn and its controls read, then the controls
+    are put back as they were. This recalls snapshots on a live system, so on a real Core it needs
+    qrc_connect(..., allow_changes=True), which the user must have asked for. Only blocks QRC can reach
+    (Script Access External or All) are read. With out_path, a copy of the design is written there with
+    those snapshots recorded into it (in emulation) and read back. Snapshots never saved are listed as empty."""
+    from qsys_mcp import live, snapshotdata
+    _check_write()
+    design = designs.read(path)
+    pulled = await live.pull_snapshots(qrc, design, banks, numbers)
+    out = {"core": qrc.host, "banks": pulled}
+    if out_path:
+        out_path = os.path.abspath(out_path)
+        if out_path == os.path.abspath(path):
+            raise ValueError("give out_path a new file: the design itself is kept as it is")
+        import shutil
+        shutil.copyfile(path, out_path)
+        todo = {b: {"controller": r["controller"], "snapshots": r["snapshots"]} for b, r in pulled.items() if r["snapshots"]}
+        rec = await runtime.record_snapshots(designer, emulator, out_path, todo, discard_changes) if todo else {}
+        out["written"] = {"path": out_path, "recorded": rec.get("copied_into_design"), "problems": rec.get("problems"),
+                          "read_back": snapshotdata.contents(out_path)}
+    return out
+
+
+@tool(APP_SAFE)
+def send_to_core(path: str, confirm: bool = False, discard_changes: bool = False, wait: float = 60) -> dict:
+    """Open a design in Designer and run File > Save to Core & Run: the Core named in the design gets
+    it and runs it, replacing what it runs. Only with confirm=True, which the user must have asked for.
+    Designer finds the Core by the design's Core name; a login, a choice of Core or a confirmation it
+    asks for is returned (list_dialogs / dialog_button), never answered here, and credentials are the
+    user's to type. If no Core answers within `wait` seconds the request is cancelled and that is said."""
+    if not confirm:
+        raise ValueError("Sending a design replaces what the Core runs: ask the user, then call again with confirm=True.")
+    opened = designer.open_design(path, discard_changes)
+    return {"opened": opened, "core_name": designs.read(path).get("core", {}).get("name"), **designer.send_to_core(wait)}
+
+
+@tool(APP_SAFE)
+def load_from_core(confirm: bool = False, wait: float = 60) -> dict:
+    """File > Load from Core & Connect in Designer: the design running on a Core opens connected, with the
+    snapshots saved on site. Save it from Designer (File > Save As) under a new name, then read_snapshots
+    or compare_designs work on that file. Only with confirm=True (it connects Designer to a live system);
+    the choice of Core and any login are shown as dialogs for the user."""
+    if not confirm:
+        raise ValueError("Connecting Designer to a Core goes live: ask the user, then call again with confirm=True.")
+    return designer.load_from_core(wait)
 
 
 @tool(LIVE_READ)
