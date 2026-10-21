@@ -328,6 +328,7 @@ def screenshot(view: str | None = None, name: str | None = None, page: str | Non
     """Picture of the Designer window (brought to the front). The image is sent to the model.
     view='schematic' (name = page title) or view='uci' (name = UCI, optional page) first opens that
     page fitted to the window; this clicks Designer's Design Elements panel, which has no UI Automation.
+    In Designer 10.5 the View zoom commands don't reach the UCI editor, so a UCI shows at 100 %.
     save_to also writes the PNG to that path."""
     if view:
         designer.show_view(view, name or "", page)
