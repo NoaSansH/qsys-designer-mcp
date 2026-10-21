@@ -101,4 +101,5 @@ def build(design: dict, controls: dict, name: str = "Test", width: int = 1280, h
         for p in pages:
             for e in p["elements"]:
                 e["x"] += NAV
-    return {"name": name, "width": full, "height": height, "pages": pages}
+    nav = {"navigation": "Left", "navigation_size": NAV} if len(pages) > 1 else {"navigation": "None"}
+    return {"name": name, "width": full, "height": height, **nav, "pages": pages}

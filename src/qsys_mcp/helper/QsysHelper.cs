@@ -995,9 +995,18 @@ static partial class QsysHelper
         if (us["width"] != null || us["height"] != null) QUci.SetSize(panel, (int?)us["width"] ?? 0, (int?)us["height"] ?? 0, size);
         else QUci.ReadSize(panel, size);
         sizes.Add(size);
+        // page navigation: the bar Q-SYS draws with a tab per page
+        if (us["navigation"] != null) Q.SetEnum(panel, "NavigationStyle", (string)us["navigation"]);
+        if (us["tab_style"] != null) Q.SetEnum(panel, "TabStyle", (string)us["tab_style"]);
+        if (us["navigation_size"] != null) Q.Set(panel, "NavigationWidth", (double)us["navigation_size"]);
+        if (us["navigation_font_size"] != null) Q.Set(panel, "NavigationFontSize", (double)us["navigation_font_size"]);
+        if (us["swipe"] != null) Q.Set(panel, "IsSwipeNavigationDisabled", !(bool)us["swipe"]);
+        if (us["activity_timeout"] != null) Q.Set(panel, "ActivityTimeout", (int)us["activity_timeout"]);
         var pages = (IList)Q.Get(panel, "Pages");
-        int count = 0, index = 0;
-        foreach (JObject ps in (us["pages"] as JArray ?? new JArray()))
+        var pageSpecs = (us["pages"] as JArray ?? new JArray()).Cast<JObject>().ToList();
+        var byTitle = new Dictionary<string, object>();
+        var links = new List<Tuple<object, object>>();
+        for (int index = 0; index < pageSpecs.Count; index++)   // every page first: a link may point to a later one
         {
             object page;
             if (index < pages.Count) page = pages[index];
@@ -1007,8 +1016,14 @@ static partial class QsysHelper
                 try { Q.Set(page, "Panel", panel); } catch { }
                 pages.Add(page);
             }
-            index++;
-            Q.Set(page, "Title", (string)ps["name"]);
+            Q.Set(page, "Title", (string)pageSpecs[index]["name"]);
+            byTitle[(string)pageSpecs[index]["name"]] = page;
+        }
+        int count = 0;
+        for (int index = 0; index < pageSpecs.Count; index++)
+        {
+            var ps = pageSpecs[index];
+            var page = pages[index];
             if (ps["color"] != null) Q.Set(page, "Color", Q.C((string)ps["color"]));
             var layer = Q.L(Q.Get(page, "Layers"))[0];
             // group boxes first: they get the page's lowest ZOrder, so they sit behind everything else on it
@@ -1020,9 +1035,20 @@ static partial class QsysHelper
                 if (kind == "text") el = UciText(layer, es);
                 else if (kind == "control") el = UciControl(layer, es, comps);
                 else if (QUci.IsGraphic(kind)) el = QUci.Graphic(layer, kind, es);
-                else throw new Exception("UCI element type must be control, text, group_box or header, not " + kind);
+                else if (kind == "image") el = UciImage(layer, es);
+                else if (kind == "page_link") el = UciPageLink(layer, es, byTitle, links);
+                else throw new Exception("UCI element type must be control, text, group_box, header, image or page_link, not " + kind);
                 Q.Set(el, "ZOrder", ++count);
             }
+        }
+        if (links.Count > 0)
+        {
+            // a page link goes through the UCI's own controller, which exists once the UCI is attached
+            if (Q.TryGet(panel, "IsAttached") is bool && !(bool)Q.Get(panel, "IsAttached")) Q.Call(panel, "Attach");
+            foreach (var pg in Q.L(Q.Get(panel, "Pages")))
+                foreach (var el in Q.L(Q.Get(pg, "AllChildren")))
+                    if (Q.TryGet(el, "IsAttached") is bool && !(bool)Q.Get(el, "IsAttached")) Q.Call(el, "Attach");
+            foreach (var l in links) Q.Set(l.Item1, "Uci", l.Item2);
         }
         return count;
     }
@@ -1044,8 +1070,51 @@ static partial class QsysHelper
         if (es["corner_radius"] != null) Q.Set(cs, "CornerRadius", (double)es["corner_radius"]);
         if (es["off_color"] != null) { Q.Set(cs, "IsOffColorOverridden", true); Q.Set(cs, "OffColor", Q.C((string)es["off_color"])); }
         if (es["show_textbox"] != null) Q.Set(cs, "IsTextboxVisible", (bool)es["show_textbox"]);
+        // a button drawn with pictures: image_on / image_off (and the pressed ones), base64 from the server
+        bool images = false;
+        foreach (var state in new[] { "On", "Off", "PressedOn", "PressedOff" })
+        {
+            var key = "image_" + (state == "PressedOn" ? "pressed_on" : state == "PressedOff" ? "pressed_off" : state.ToLower());
+            if (es[key] == null) continue;
+            Q.Set(cs, state + "ImageData", Convert.FromBase64String((string)es[key]["data"]));
+            Q.SetEnum(cs, state + "ImageType", (string)es[key]["format"] == "svg" ? "Svg" : "Image");
+            images = true;
+        }
+        if (images) Q.SetEnum(cs, "ButtonVisualStyle", "Image");
         Q.Call(layer, "AddChild", cs);
         return cs;
+    }
+
+    // {"type": "image", "data": base64, "format": "png"|"jpg"|"svg", x, y, w, h}: a logo or a picture
+    static object UciImage(object layer, JObject es)
+    {
+        var img = Activator.CreateInstance(Q.T("QSC.QSys.Design.GraphicImage"), true);
+        Q.Set(img, "Data", Convert.FromBase64String((string)es["data"]));
+        Q.SetEnum(img, "Type", (string)es["format"] == "svg" ? "Svg" : "Image");
+        Place(img, es);
+        Q.Call(layer, "AddChild", img);
+        return img;
+    }
+
+    // {"type": "page_link", "page": "Audio", x, y, w, h, "text"?}: a touch area that opens another page of the UCI
+    static object UciPageLink(object layer, JObject es, Dictionary<string, object> pages, List<Tuple<object, object>> links)
+    {
+        object target;
+        if (!pages.TryGetValue((string)es["page"] ?? "", out target))
+            throw new Exception("page_link: no page '" + (string)es["page"] + "' in this UCI; pages: " + string.Join(", ", pages.Keys));
+        var region = Activator.CreateInstance(Q.T("QSC.QSys.Design.Graphics.Region"), true);
+        // a region's size comes from its outline: the corners first, then its place
+        double x = (double?)es["x"] ?? 0, y = (double?)es["y"] ?? 0, w = (double?)es["w"] ?? 100, h = (double?)es["h"] ?? 40;
+        var points = Q.Get(region, "Points");
+        var add = points.GetType().GetMethod("Add", new[] { typeof(System.Windows.Point) });
+        foreach (var p in new[] { new System.Windows.Point(x, y), new System.Windows.Point(x + w, y), new System.Windows.Point(x + w, y + h), new System.Windows.Point(x, y + h) })
+            add.Invoke(points, new object[] { p });
+        if (es["text"] != null) Q.Set(region, "Label", (string)es["text"]);
+        if (es["color"] != null) Q.Set(region, "TextColor", Q.C((string)es["color"]));
+        if (es["font_size"] != null) Q.Set(region, "FontSize", (double)es["font_size"]);
+        Q.Call(layer, "AddChild", region);
+        links.Add(Tuple.Create(region, target));         // linked once the UCI is attached (see BuildUci)
+        return region;
     }
 
     static object UciText(object layer, JObject es)
@@ -1186,6 +1255,29 @@ static partial class QsysHelper
                         eo["component"] = byId.TryGetValue(Convert.ToString(Q.Get(el, "Id")), out comp) ? NameOf(comp) : null;
                         eo["control"] = Convert.ToString(Q.Get(el, "Name"));
                         eo["style"] = Convert.ToString(Q.TryGet(el, "VisualStyle"));
+                        if (Convert.ToString(Q.TryGet(el, "ButtonVisualStyle")) == "Image") eo["images"] = true;
+                    }
+                    else if (el.GetType().Name == "GraphicImage")
+                    {
+                        var data = Q.TryGet(el, "Data") as byte[];
+                        eo["format"] = Convert.ToString(Q.TryGet(el, "Type")) == "Svg" ? "svg" : "image";
+                        eo["bytes"] = data == null ? 0 : data.Length;
+                        if (data != null && data.Length <= 400000) eo["data"] = Convert.ToBase64String(data);
+                    }
+                    else if (el.GetType().Name == "Region")
+                    {
+                        var target = Q.TryGet(el, "Uci");
+                        if (target != null) eo["page"] = Convert.ToString(Q.Get(target, "Title"));
+                        var corners = Q.TryGet(el, "Points") as IEnumerable;      // a region is placed by its outline
+                        if (corners != null)
+                        {
+                            var pts = corners.Cast<System.Windows.Point>().ToList();
+                            if (pts.Count > 0)
+                            {
+                                eo["x"] = pts.Min(q => q.X); eo["y"] = pts.Min(q => q.Y);
+                                eo["w"] = pts.Max(q => q.X) - pts.Min(q => q.X); eo["h"] = pts.Max(q => q.Y) - pts.Min(q => q.Y);
+                            }
+                        }
                     }
                     else QUci.ReadGraphic(el, eo);
                     els.Add(eo);
@@ -1194,6 +1286,10 @@ static partial class QsysHelper
             }
             var uo = new JObject { { "name", Convert.ToString(Q.Get(panel, "Title")) } };
             QUci.ReadSize(panel, uo);
+            uo["navigation"] = Convert.ToString(Q.TryGet(panel, "NavigationStyle"));
+            uo["tab_style"] = Convert.ToString(Q.TryGet(panel, "TabStyle"));
+            var navWidth = Q.TryGet(panel, "NavigationWidth");
+            if (navWidth != null) uo["navigation_size"] = Convert.ToDouble(navWidth);
             uo["pages"] = pagesJ;
             ucis.Add(uo);
         }

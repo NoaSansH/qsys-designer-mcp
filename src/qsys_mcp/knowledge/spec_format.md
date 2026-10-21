@@ -138,7 +138,11 @@ Notes and group boxes on the schematic:
 ```
 
 - `width` and `height` set the UCI's size in pixels. Give both, or neither to keep Designer's default. When they change the size, the builder also sets the panel type to Custom, the orientation (portrait when `height` is more than `width`) and the aspect ratio that matches, e.g. 16:10 for 1280 × 800. `build_design` reports the size each UCI ended up with under `uci_sizes`.
-- Element `type`s are `control` (the default), `text`, `group_box` (a frame with an optional title) and `header` (a title with a line).
+- Element `type`s are `control` (the default), `text`, `group_box` (a frame with an optional title), `header` (a title with a line), `image` and `page_link`.
+- `navigation` on the UCI shows Q-SYS's page tabs: `None`, `Left`, `Right`, `Top` or `Bottom`, with `tab_style` (`Classic` or `Chevron`), `navigation_size` (the bar's width in pixels), `navigation_font_size`, `swipe` (swiping between pages, default on) and `activity_timeout`. The bar is drawn over the page: start the page's elements after it (e.g. `x` from `navigation_size` + 20 with `Left`).
+- `image`: `{"type": "image", "file": "logo.png", "x", "y", "w", "h"}`, PNG, JPG, GIF, BMP or SVG, the path relative to `spec_dir`. The picture is saved inside the design.
+- `page_link`: `{"type": "page_link", "page": "Audio", "text": "Audio settings", "x", "y", "w", "h", "font_size", "color"}`, a touch area that opens another page of the same UCI.
+- A button can be drawn with pictures: `image_on`, `image_off` (and `image_pressed_on`, `image_pressed_off`) take image files.
 - `group_box` and `header` take `x`, `y`, `w`, `h`, `text`, `font_size`, `bold`, `color` (the text colour) and `align` (`Left`, `Center` or `Right`). A `group_box` also takes `fill`, `stroke`, `stroke_width` (whole pixels) and `corner_radius`. Leave a key out to keep Designer's default; without `text` there's no title.
 - `style` values include `Button`, `Knob`, `Fader`, `Text`, `Meter` and `Led`. If you leave it out, the control's default style is used.
 - Colours are `#AARRGGBB`.

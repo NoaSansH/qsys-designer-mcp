@@ -8,6 +8,7 @@ layout (overlaps, reading order, notes, signal names) without opening Designer.
 
 from __future__ import annotations
 
+import base64
 import io
 import os
 
@@ -159,6 +160,28 @@ def schematic(design: dict, page: str | None = None) -> bytes:
     return _png(img)
 
 
+def _navigation(d, u: dict, current: str, s: float, W: int, H: int) -> None:
+    """The page tabs Q-SYS draws over the page when the UCI has navigation."""
+    side = u.get("navigation") or "None"
+    if side in ("None", ""):
+        return
+    titles = [p["name"] for p in u["pages"]]
+    size = (u.get("navigation_size") or 160) * s
+    f = _font(14 * s, True)
+    if side in ("Left", "Right"):
+        x0 = 0 if side == "Left" else W * s - size
+        d.rectangle((x0, 0, x0 + size, H * s), fill=(100, 100, 100))
+    for i, t in enumerate(titles):
+        if side in ("Left", "Right"):
+            x0 = 0 if side == "Left" else W * s - size
+            box = (x0, i * 48 * s, x0 + size, (i + 1) * 48 * s)
+        else:
+            y0 = 0 if side == "Top" else H * s - 48 * s
+            box = (i * size, y0, (i + 1) * size, y0 + 48 * s)
+        d.rectangle(box, fill=(225, 225, 225) if t == current else (100, 100, 100), outline=(60, 60, 60))
+        _text(d, box, t, f, (20, 20, 20) if t == current else (240, 240, 240))
+
+
 CONTROL_DRAW = {"button": "button", "toggle": "button", "trigger": "button", "momentary": "button",
                 "fader": "fader", "meter": "meter", "knob": "knob", "led": "led", "indicator": "led"}
 
@@ -184,7 +207,23 @@ def uci(design: dict, name: str | None = None, page: str | None = None) -> bytes
         x0, y0, x1, y1 = e["x"] * s, e["y"] * s, (e["x"] + e["w"]) * s, (e["y"] + e["h"]) * s
         label = e.get("label") or ""
         t = e.get("type", "")
-        if t == "GroupBox":
+        if t == "GraphicImage":
+            pic = None
+            if e.get("data") and e.get("format") != "svg":
+                try:
+                    pic = Image.open(io.BytesIO(base64.b64decode(e["data"]))).convert("RGBA")
+                except OSError:
+                    pic = None
+            if pic is not None and x1 - x0 >= 1 and y1 - y0 >= 1:
+                pic = pic.resize((max(1, round(x1 - x0)), max(1, round(y1 - y0))))
+                img.alpha_composite(pic, (round(x0), round(y0)))
+            else:
+                d.rectangle((x0, y0, x1, y1), outline=(160, 160, 160))
+                _text(d, (x0, y0, x1, y1), "SVG" if e.get("format") == "svg" else "image", _font(10 * s), (180, 180, 180))
+        elif t == "Region":
+            d.rectangle((x0, y0, x1, y1), outline=(120, 170, 255), width=max(1, round(2 * s)))
+            _text(d, (x0, y0, x1, y1), f"{label} → {e.get('page', '?')}", _font((e.get("font_size") or 12) * s), (200, 220, 255))
+        elif t == "GroupBox":
             fill = _rgba(e.get("fill"), (255, 255, 255, 12))
             d.rounded_rectangle((x0, y0, x1, y1), radius=(e.get("corner_radius") or 6) * s,
                                 fill=fill[:3] if fill[3] > 100 else None, outline=_rgba(e.get("stroke"), (150, 150, 150, 255))[:3])
@@ -212,4 +251,5 @@ def uci(design: dict, name: str | None = None, page: str | None = None) -> bytes
             else:
                 d.rectangle((x0, y0, x1, y1), fill=(25, 25, 25), outline=(130, 130, 130))
                 _text(d, (x0, y0, x1, y1), label or f"{e.get('component', '')}.{e.get('control', '')}", _font(10 * s), (220, 220, 220))
+    _navigation(d, u, pg["name"], s, W, H)
     return _png(img)
