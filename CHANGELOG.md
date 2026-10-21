@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.0 (2026-10-21)
+
+- `check_contract` and `list_controls`: what a control system or script expects of a design (blocks, Script Access, controls read or written), with near-miss suggestions.
+- `document_design`: an HTML document of a design, optionally with what every snapshot sets (read in emulation). `compare_designs`: what changed between two versions.
+- `make_test_uci`: a test UCI generated from the design (snapshot buttons, meters, gains and mutes, Text Controller states); `edit_design` gains `add_uci` and `remove_uci`.
+- `lua_test`: Text Controller scripts run outside Designer in a real Lua interpreter, against simulated Controls, Component.New, Timer (simulated clock), NamedControl and print.
+- Named Controls (`named_controls`, edit ops) and the number of Global Snapshots (`global_snapshot_count`).
+- Templates: `include` merges spec fragments with a prefix, parameters and an offset.
+- Real Core: `qrc_connect` and `save_snapshot_live`; changes to a real Core need `allow_changes`, and emulation tools always use the local emulator.
+- The .NET 8 helper for Designer 10 is rebuilt with every addition since 0.1.
+
 ## 0.3.0 (2026-10-21)
 
 - `edit_design`: changes a saved design operation by operation (values, properties, moves, blocks, wires, signal names, notes, snapshot banks) without rebuilding it, so snapshot contents and UCIs stay.

@@ -25,17 +25,21 @@ An MCP server that lets Claude, or any other MCP client, build Q-SYS designs. Yo
 - **Edit a saved design** operation by operation (`edit_design`): move, rewire, set a value or a plugin's IP, add or remove blocks, without rebuilding and without losing snapshot contents.
 - **Read any design back,** including ones it didn't build: components, properties, stored values, pins, wires and UCIs.
 - **Check signal flow statically** over the real wiring, for example "mic 1 reaches the USB send", "the laptop never reaches the far end", "the echo canceller's reference carries the far end", or "no unconnected pins".
+- **Check a design against a control system's needs** (`check_contract`), **document it** as an HTML page with every setting and what each snapshot sets (`document_design`), **compare two versions** (`compare_designs`) and **generate a test UCI** (`make_test_uci`).
+- **Test Lua outside Designer** (`lua_test`): a Text Controller's script runs against simulated controls, blocks and timers, in milliseconds.
+- **Templates**: reusable spec fragments included with a prefix, parameters and an offset.
 - **Check in Designer and test scenarios.** `designer_check` runs Designer's Check Design; `run_scenario` emulates and checks control state step by step (recall a snapshot, expect values).
 - **Emulate and test.** It opens a test copy in Designer's emulator with every block visible to QRC, then reads and sets controls to test modes, mutes and script logic.
 - **Calibrate stored values.** It measures what the engine actually loads for each stored value and fixes the file if needed (more on why below).
 
-It works with Designer **9.x** and **10.x**, and has been tested with 9.13.1 and 10.3.0. Files are read with the version that saved them. New builds use the newest install unless you pick one.
+It works with Designer **9.x** and **10.x**. The additions since 0.1 are tested with 9.13.2 LTS; the .NET 8 helper for 10.x is rebuilt with them. Files are read with the version that saved them. New builds use the newest install unless you pick one.
 
 ## Requirements
 
 - Windows 10 or 11
 - Q-SYS Designer 9.x or later, installed normally. 10.x brings its own .NET 8 runtime with it.
 - Python 3.11 or later, or [uv](https://docs.astral.sh/uv/)
+- For `lua_test`: a Lua 5.3 or 5.4 interpreter (`winget install DEVCOM.Lua`, or set `QSYS_LUA`)
 
 ## Install
 
@@ -122,6 +126,7 @@ Some controls are linked. For example, the Flex inputs' preamp gain and sensitiv
 
 - **It won't overwrite your files.** `build_design` won't replace an existing file unless it's explicitly told to. Calibration only changes stored positions, in the file you point it at. Testing uses a copy in the cache folder.
 - **It won't throw away your work.** It never discards unsaved changes in Designer unless told to (`discard_changes=True`). Claude should only do that when you've said the changes don't matter. Stopping emulation counts as a change, because Designer records the control values from the run.
+- **A real Core is read-only by default.** Emulation tools always talk to Designer's emulator on this PC. `qrc_connect` points the `qrc_*` tools at a real Core, and changing it (`qrc_set_control`, `save_snapshot_live`...) is refused unless `allow_changes=True` was given, which only the user should decide.
 - **QRC can change a live system.** `qrc_set_control` and `qrc_set_named_control` change live values. Against the emulator that's harmless. If you point `QSYS_QRC_HOST` at a real Core, they change a working system.
 - **Screenshots leave your machine.** The `screenshot` tool sends a picture of the Designer window to the AI model you're using. Design files themselves are read locally, and only what a tool returns is sent.
 - **Every tool is labelled.** Each one is marked read-only, writes files, or changes live state, so your client can ask before the risky ones.
@@ -139,11 +144,12 @@ Because it relies on undocumented internals, any Designer update could break it.
 | Area | Tools |
 |---|---|
 | Learn | `designer_versions`, `probe_components` |
-| Build, edit and check | `build_design`, `edit_design`, `read_design`, `check_design`, `designer_check`, `learn_block_sizes` |
+| Build, edit and check | `build_design`, `edit_design`, `read_design`, `list_controls`, `check_design`, `check_contract`, `designer_check`, `learn_block_sizes` |
+| Document | `document_design`, `compare_designs`, `make_test_uci` |
 | Run | `designer_status`, `open_design`, `close_design`, `emulate_design`, `stop_emulation`, `list_dialogs`, `dialog_button`, `screenshot` |
 | Stored values and snapshots | `calibrate_values`, `record_snapshots` |
-| Runtime (QRC) | `run_scenario`, `qrc_status`, `qrc_list_components`, `qrc_get_controls`, `qrc_set_control`, `qrc_named_controls`, `qrc_set_named_control`, `qrc_watch` |
-| Lua | `lua_check`, `new_plugin` |
+| Runtime (QRC) | `run_scenario`, `qrc_connect`, `save_snapshot_live`, `qrc_status`, `qrc_list_components`, `qrc_get_controls`, `qrc_set_control`, `qrc_named_controls`, `qrc_set_named_control`, `qrc_watch` |
+| Lua | `lua_check`, `lua_test`, `new_plugin` |
 
 There are three resources, `qsys://spec-format`, `qsys://lua-api` and `qsys://design-guide`, plus a `review_design` prompt.
 

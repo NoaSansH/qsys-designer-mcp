@@ -66,6 +66,7 @@ static partial class QsysHelper
             case "copy": return Copy(req);
             case "copy_snapshots": return CopySnapshots(req);
             case "edit": return Edit(req);
+            case "controls": return Controls(req);
             default: throw new Exception("unknown command " + req["command"]);
         }
     }
@@ -520,6 +521,10 @@ static partial class QsysHelper
         int graphics = 0;
         foreach (JObject gs in (spec["graphics"] as JArray ?? new JArray())) { AddGraphic(ctx, gs); graphics++; }
 
+        // named controls (Named Controls pane), and how many Global Snapshots the design has
+        foreach (JObject nc in (spec["named_controls"] as JArray ?? new JArray())) AddNamedControl(ctx, nc);
+        if (spec["global_snapshot_count"] != null) SetGlobalSnapshots(doc, (int)spec["global_snapshot_count"]);
+
         // snapshot banks and their Snapshot Controllers
         var banks = new JArray();
         foreach (JObject bs in (spec["snapshot_banks"] as JArray ?? new JArray()))
@@ -658,6 +663,34 @@ static partial class QsysHelper
             throw new Exception(e[1] + " already carries the signal name '" + current + "', not '" + e[2] + "'");
         NameSignal(ctx, a, e[0], e[2]);
         Q.Set(b, "Label", e[2]);
+    }
+
+    // {"name": "RoomVolume", "component": "VOL", "control": "gain"}
+    static object AddNamedControl(Ctx ctx, JObject nc)
+    {
+        object c;
+        if (!ctx.Comps.TryGetValue((string)nc["component"], out c)) throw new Exception("named control " + nc["name"] + ": no component " + nc["component"]);
+        var id = (string)nc["control"];
+        if (Descriptor(c, id) == null) throw new Exception("named control " + nc["name"] + ": " + nc["component"] + " has no control " + id);
+        var list = (IList)Q.Get(ctx.Doc, "ExternalControlIds");
+        if (list.Cast<object>().Any(x => Convert.ToString(Q.Get(x, "Id")) == (string)nc["name"]))
+            throw new Exception("a named control is already called " + nc["name"]);
+        var el = Activator.CreateInstance(Q.T("QSC.QSys.Design.ExternalControlId"), true);
+        Q.Set(el, "Component", c);
+        Q.Set(el, "BaseControlId", id);
+        Q.Set(el, "Id", (string)nc["name"]);
+        list.Add(el);
+        // attaching the new element lists it a second time: keep one
+        for (int i = list.Count - 1; i >= 0 && list.Cast<object>().Count(x => x == el) > 1; i--)
+            if (list[i] == el) list.RemoveAt(i);
+        return el;
+    }
+
+    static void SetGlobalSnapshots(object doc, int count)
+    {
+        var global = Q.L(Q.Get(doc, "Snapshots")).FirstOrDefault(b => b.GetType().Name == "GlobalBank");
+        if (global == null) throw new Exception("this design has no Global snapshot bank");
+        Q.Set(global, "Count", count);
     }
 
     static object AddGraphic(Ctx ctx, JObject gs)
@@ -1142,6 +1175,12 @@ static partial class QsysHelper
                 { "controls", ctl }, { "saved_snapshots", new JArray(stored) } });
         }
         res["snapshot_banks"] = banks;
+        res["named_controls"] = new JArray(Q.L(Q.Get(doc, "ExternalControlIds")).Select(x => new JObject {
+            { "name", Convert.ToString(Q.Get(x, "Id")) },
+            { "component", Q.Get(x, "Component") == null ? null : NameOf(Q.Get(x, "Component")) },
+            { "control", Convert.ToString(Q.Get(x, "BaseControlId")) } }));
+        var gb = Q.L(Q.Get(doc, "Snapshots")).FirstOrDefault(b => b.GetType().Name == "GlobalBank");
+        if (gb != null) res["global_snapshot_count"] = (int)Q.Get(gb, "Count");
         return res;
     }
 

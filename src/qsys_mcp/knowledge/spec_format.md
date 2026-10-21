@@ -145,6 +145,27 @@ Notes and group boxes on the schematic:
 - Graphics drawn behind controls may still cover them: Designer has drawn graphic boxes on top of controls before. Open a page with group boxes in Designer to check it, and give a box under controls a translucent `fill` (alpha below `FF`), so the controls stay visible either way.
 - A Lua script can set a button's text at runtime with `Controls.X.Legend = "..."`. For that to show, leave `label` unset.
 
+## named_controls and global snapshots
+
+```json
+"named_controls": [{"name": "RoomVolume", "component": "ROOM_VOL", "control": "gain"}],
+"global_snapshot_count": 8
+```
+
+Named Controls (Named Controls pane) are reachable by name over QRC (`qrc_named_controls`) and from Lua (`NamedControl`). `global_snapshot_count` sets how many Global Snapshots the design has.
+
+## Templates
+
+A template is a JSON file holding part of a spec (components, wires, signals, graphics, snapshot_banks, named_controls, ucis, plus `params` defaults). A spec includes it as often as needed:
+
+```json
+"include": [{"file": "room.json", "prefix": "R2_", "params": {"ROOM": "Room 2"}, "dx": 0, "dy": 900, "page": "Room 2"}]
+```
+
+- `${NAME}` in the template is replaced by the param's value (a string that is only `${NAME}` keeps the value's type).
+- The template's blocks, banks, controllers, named controls, UCIs and signal names get the prefix; wire and signal endpoints follow, and endpoints to blocks outside the template keep their names.
+- Positions move by `dx`/`dy`; `page` puts everything on that page (added to `pages`). File paths are relative to the including spec's folder (`spec_dir`); templates can include templates.
+
 ## Automatic layout
 
 Blocks can be placed for you, along the signal flow:
@@ -179,6 +200,9 @@ Blocks can be placed for you, along the signal flow:
 | `add_signal`, `rename_signal`, `remove_signal` | `from`, `to`, `signal` / `signal`, `name` / `pin` or `signal` |
 | `add_graphic`, `set_graphic`, `remove_graphic` | `graphic` (as in `graphics`) / `text` + `set` / `text` |
 | `add_snapshot_bank` | `bank` (as in `snapshot_banks`); fill it with `record_snapshots` |
+| `add_uci`, `remove_uci` | `uci` (as in `ucis`) / `name` |
+| `add_named_control`, `remove_named_control` | `name`, `component`, `control` / `name` |
+| `set_global_snapshot_count` | `count` |
 
 Plugin blocks keep working in a saved design: their code is in the file, so their controls are available to `set_value` without the plugin being installed.
 
@@ -188,6 +212,13 @@ Two tools check a built design:
 
 - `read_design` reads a saved file back.
 - `check_design` runs static checks on it: unique names, unconnected pins, stored positions, and signal paths. Signal paths are written as `{"from": "FLEX_IN.out.3", "to": "USB_TX_CONF", "expect": false}`, with optional `via: [...]`. An AEC's Reference input counts as subtracted, not passed through.
+
+Other checks and documents:
+
+- `check_contract` checks what a control system or a script expects of the design: blocks by code name, Script Access (`qrc`, `script` or `both`) and the controls read or written. `list_controls` lists every control of the blocks.
+- `document_design` writes an HTML document of the design (inventory, blocks and settings, wires and signal names, snapshot banks and, with `with_snapshot_values`, what each snapshot sets, UCIs, notes). `compare_designs` lists what changed between two versions.
+- `make_test_uci` adds a test UCI generated from the design: snapshot buttons, meters, gains and mutes, Text Controller states.
+- `lua_test` runs a Text Controller's script outside Designer against simulated Controls, other blocks and timers.
 
 `designer_check` runs Designer's own Check Design and returns its errors, warnings and the licences the design needs.
 

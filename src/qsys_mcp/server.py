@@ -34,12 +34,23 @@ mcp = MCPServer(
 )
 
 designer = Designer()
+LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
+# Designer's emulator: emulation tools (emulate, calibrate, snapshots, scenarios) always talk to this one
+emulator = QrcClient(host="127.0.0.1", port=1710)
+# target of the qrc_* tools: the emulator, or a Core chosen with qrc_connect / QSYS_QRC_HOST
 qrc = QrcClient(
     host=os.environ.get("QSYS_QRC_HOST", "127.0.0.1"),
     port=int(os.environ.get("QSYS_QRC_PORT", "1710")),
     user=os.environ.get("QSYS_QRC_USER"),
     password=os.environ.get("QSYS_QRC_PASSWORD"),
 )
+live_changes_allowed = False   # writes to a real Core need qrc_connect(..., allow_changes=True)
+
+
+def _check_write() -> None:
+    if qrc.host not in LOCAL_HOSTS and not live_changes_allowed:
+        raise QrcError(f"{qrc.host} is a real Core: changing it was not allowed. Ask the user, then call "
+                       "qrc_connect with allow_changes=True.")
 
 EXPECTED = (AppError, QrcError, headless.HelperError, designs.SpecError, ValueError, FileExistsError, FileNotFoundError)
 
@@ -138,6 +149,67 @@ def edit_design(path: str, ops: list[dict], out_path: str | None = None, spec_di
 
 
 @tool(READ_ONLY)
+def check_contract(path: str, contract: dict) -> dict:
+    """Check that a design offers what a control system or script expects: each block by code name,
+    with the Script Access it needs, and the controls it reads or writes, e.g.
+    {"via": "qrc", "components": {"Room_Volume": {"controls": ["gain", {"id": "mute", "write": true}]},
+                                  "Mic_LED_Logic": {"via": "script"}}}.
+    via is qrc (External or All), script (Script or All) or both (All). Also lists blocks open to QRC
+    that the contract doesn't mention."""
+    from qsys_mcp import contract as contract_mod
+    return contract_mod.check(path, contract)
+
+
+@tool(READ_ONLY)
+def list_controls(path: str, components: list[str] | None = None) -> dict:
+    """Every control of the blocks of a saved design (id, name, type, range, read-only, pin style),
+    with each block's class and Script Access. Filter with components=[code names]."""
+    return headless.run({"command": "controls", "path": os.path.abspath(path), "components": components},
+                        headless.pick(for_file=path))
+
+
+@tool(WRITES_FILE)
+async def document_design(path: str, out_html: str, title: str | None = None, lang: str = "fr",
+                          with_snapshot_values: bool = False, overwrite: bool = False) -> dict:
+    """Write a self-contained HTML document of a saved design: inventory, blocks with properties and
+    stored values, wires and signal names, snapshot banks, UCIs and notes. lang is fr or en.
+    with_snapshot_values also lists what every saved snapshot sets (emulates a test copy, which closes
+    any running Designer first)."""
+    from qsys_mcp import report
+    if os.path.exists(out_html) and not overwrite:
+        raise FileExistsError(f"{out_html} exists; pass overwrite=True to replace it")
+    values = await runtime.snapshot_contents(designer, emulator, path, True) if with_snapshot_values else None
+    page = report.document(designs.read(path), title, lang, values)
+    with open(out_html, "w", encoding="utf-8") as fh:
+        fh.write(page)
+    return {"path": os.path.abspath(out_html), "bytes": len(page.encode("utf-8")), "snapshot_values": bool(values)}
+
+
+@tool(READ_ONLY)
+def compare_designs(path_a: str, path_b: str, positions: bool = False) -> dict:
+    """What changed from design A to design B: blocks added, removed or changed (class, label, Script
+    Access, properties, stored values, signal names, and positions if asked), connections, snapshot
+    banks and UCIs. Snapshot contents are compared by which snapshots hold data, not by value."""
+    from qsys_mcp import report
+    return report.diff(designs.read(path_a), designs.read(path_b), positions)
+
+
+@tool(WRITES_FILE)
+def make_test_uci(path: str, name: str = "Test", out_path: str | None = None, width: int = 1280, height: int = 800) -> dict:
+    """Add a test UCI generated from the design: snapshot Load buttons, a meter for every level, a fader
+    and mute for every gain, and the controls of Text Controllers, one page per section. Writes `path`
+    in place unless out_path (a new file) is given; an existing UCI of that name is replaced."""
+    from qsys_mcp import testpanel
+    design = designs.read(path)
+    controls = headless.run({"command": "controls", "path": os.path.abspath(path)}, headless.pick(for_file=path))["components"]
+    uci = testpanel.build(design, controls, name, width, height)
+    ops = ([{"op": "remove_uci", "name": name}] if any(u["name"] == name for u in design.get("ucis", [])) else []) +           [{"op": "add_uci", "uci": uci}]
+    res = designs.edit(path, ops, out_path)
+    return {"path": res["path"], "uci": name, "pages": [p["name"] for p in uci["pages"]],
+            "elements": sum(len(p["elements"]) for p in uci["pages"])}
+
+
+@tool(READ_ONLY)
 def read_design(path: str, components: list[str] | None = None, sections: list[str] | None = None) -> dict:
     """Read a saved .qsys back: core, USB, inventory, pages, every component (class, name, Script Access,
     properties, stored values with positions, pins and their signal names), wires, UCIs, schematic
@@ -190,7 +262,7 @@ async def emulate_design(path: str, test_copy: bool = True, discard_changes: boo
     test copy (in the cache folder) with every block's Script Access set to All, so QRC can see everything;
     the original file is not touched. test_copy=False emulates the file itself, with its real access
     settings. Closes any running Designer first (see open_design for discard_changes)."""
-    return await runtime.emulate(designer, qrc, path, test_copy, discard_changes)
+    return await runtime.emulate(designer, emulator, path, test_copy, discard_changes)
 
 
 @tool(APP_SAFE)
@@ -206,7 +278,7 @@ async def calibrate_values(path: str, discard_changes: bool = False) -> dict:
     reads the engine's position, patches the original file, then restarts on the patched file and
     confirms each value comes up as stored, reporting any linked controls. Measured positions are cached
     for future builds. Changes the file's stored positions only; closes any running Designer first."""
-    return await runtime.calibrate(designer, qrc, path, discard_changes)
+    return await runtime.calibrate(designer, emulator, path, discard_changes)
 
 
 @tool(WRITES_FILE)
@@ -216,7 +288,7 @@ async def record_snapshots(path: str, snapshots: dict, discard_changes: bool = F
     bank's Save button, saves the copy and copies the banks' saved data into `path`. snapshots:
     {"BANK": {"controller": "CODE_NAME", "snapshots": {"1": [{"component", "control", "value"}], ...}}}.
     Only the listed banks change in `path`; closes any running Designer first."""
-    return await runtime.record_snapshots(designer, qrc, path, snapshots, discard_changes)
+    return await runtime.record_snapshots(designer, emulator, path, snapshots, discard_changes)
 
 
 @tool(APP)
@@ -227,14 +299,14 @@ async def run_scenario(path: str, steps: list[dict], discard_changes: bool = Fal
     {"expect": {"component", "control", "value" or "string", "tolerance"?}}, plus an optional "label".
     Returns every expectation with what the engine had, and stops emulating unless keep_running.
     Emulation has no audio: it tests control state, not sound."""
-    return await runtime.run_scenario(designer, qrc, path, steps, discard_changes, keep_running)
+    return await runtime.run_scenario(designer, emulator, path, steps, discard_changes, keep_running)
 
 
 @tool(APP_SAFE)
 async def learn_block_sizes(path: str, discard_changes: bool = False) -> dict:
     """Let Designer draw a design once (on a test copy) and remember the real size of each kind of
     block, so automatic layout (spec "layout") spaces blocks exactly. Closes any running Designer first."""
-    return await runtime.learn_block_sizes(designer, qrc, path, discard_changes)
+    return await runtime.learn_block_sizes(designer, emulator, path, discard_changes)
 
 
 @tool(READ_ONLY)
@@ -279,6 +351,33 @@ def designer_check(path: str | None = None, discard_changes: bool = False) -> di
 # ---- Lua -----------------------------------------------------------------------------------
 
 @tool(READ_ONLY)
+def lua_test(steps: list[dict], code: str | None = None, controls: list[dict] | None = None,
+             path: str | None = None, component: str | None = None) -> dict:
+    """Run a Text Controller script outside Designer, in a real Lua interpreter, against simulated
+    Controls, Component.New, Timer (on a simulated clock), NamedControl and print. Give `code` and its
+    `controls` (as in a spec's text_controller), or `path` + `component` to take both from a design.
+    Steps: {"set": {"control" | "component"+"control", "value"}} (fires EventHandlers, like a change
+    from outside), {"advance": seconds}, {"expect": {..., "value" | "string", "tolerance"?}}, each with an
+    optional "label". Needs Lua 5.3/5.4 (QSYS_LUA or lua on PATH)."""
+    import json as _json
+    from qsys_mcp import luatest
+    if path:
+        if not component:
+            raise ValueError("give component with path")
+        c = next((c for c in designs.read(path)["components"] if c["name"] == component), None)
+        if c is None:
+            raise ValueError(f"no component {component} in {path}")
+        code = code or c["values"].get("code", {}).get("string", "")
+        if controls is None:
+            specs = _json.loads(c["properties"].get("config") or "{}").get("ControlSpecs", [])
+            controls = [{"name": x["Name"], "count": int(x.get("Count", 1)), "min": x.get("Min", 0),
+                         "max": x.get("Max", 1), "type": str(x.get("ControlType", "")).lower()} for x in specs]
+    if not code:
+        raise ValueError("no Lua code to test")
+    return luatest.run(code, controls or [], steps)
+
+
+@tool(READ_ONLY)
 def lua_check(code: str) -> dict:
     """Syntax-check Lua (Q-SYS uses Lua 5.3) and flag common Q-SYS scripting mistakes."""
     return lua.check_syntax(code)
@@ -292,6 +391,33 @@ def new_plugin(name: str, category: str = "Custom", author: str = "", descriptio
 
 
 # ---- QRC (runtime) -------------------------------------------------------------------------
+
+@tool(APP_SAFE)
+async def qrc_connect(host: str = "127.0.0.1", port: int = 1710, allow_changes: bool = False) -> dict:
+    """Point the qrc_* tools at a Core (default: Designer's emulator on this PC). Credentials for a Core
+    with access control come from QSYS_QRC_USER / QSYS_QRC_PASSWORD. On a real Core the qrc_* tools only
+    read unless allow_changes=True, which the user must have asked for: it changes a live system.
+    Emulation tools keep using the local emulator whatever this is set to."""
+    global qrc, live_changes_allowed
+    qrc = QrcClient(host=host, port=port, user=os.environ.get("QSYS_QRC_USER"), password=os.environ.get("QSYS_QRC_PASSWORD"))
+    live_changes_allowed = bool(allow_changes) and host not in LOCAL_HOSTS
+    status = await qrc.status()
+    return {"host": host, "port": port, "real_core": host not in LOCAL_HOSTS, "changes_allowed": live_changes_allowed or host in LOCAL_HOSTS,
+            "status": status}
+
+
+@tool(LIVE_WRITE)
+async def save_snapshot_live(controller: str, number: int, values: list[dict] | None = None) -> dict:
+    """On the Core the qrc_* tools point at: optionally set controls ({"component", "control", "value"}),
+    then press the Snapshot Controller's Save for that number, so the snapshot holds the current state
+    (e.g. camera positions on site). The snapshot is saved on that Core; to bring it into the design file,
+    load the design from the Core in Designer and save it. Needs allow_changes on a real Core."""
+    _check_write()
+    for v in values or []:
+        await qrc.set(v["component"], v["control"], v["value"])
+    await qrc.set(controller, f"save_{number}", 1)
+    return {"host": qrc.host, "controller": controller, "saved": number, "values_set": len(values or [])}
+
 
 @tool(LIVE_READ)
 async def qrc_status() -> Any:
@@ -317,6 +443,7 @@ async def qrc_get_controls(component: str, controls: list[str] | None = None) ->
 async def qrc_set_control(component: str, control: str, value: Any, ramp: float | None = None) -> Any:
     """Set a control on the running design (number, string or bool; optional ramp in seconds).
     On a real Core this changes a live system."""
+    _check_write()
     return await qrc.set(component, control, value, ramp)
 
 
@@ -329,6 +456,7 @@ async def qrc_named_controls(names: list[str]) -> Any:
 @tool(LIVE_WRITE)
 async def qrc_set_named_control(name: str, value: Any, ramp: float | None = None) -> Any:
     """Set a Named Control on the running design. On a real Core this changes a live system."""
+    _check_write()
     return await qrc.named_set(name, value, ramp)
 
 
