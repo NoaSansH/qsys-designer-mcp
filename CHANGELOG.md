@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.6.0 (2026-10-22)
+
+- `read_snapshots`: what every snapshot sets, read straight from the design file (the engine's snapshot files are decoded), without Designer or emulation. `audit_design`, `document_design` and `compare_designs` use it; `compare_designs` compares snapshot values and ignores the ids Designer makes up for each block. `read_design` gives each block's GUID.
+- One helper process per Designer version stays open and takes the requests in turn: reading a design takes a quarter of a second instead of about two, the test suite runs four times faster. `QSYS_MCP_PERSISTENT=0` goes back to one process per request.
+- `screenshot` draws Designer's own window (PrintWindow): Designer can stay behind other windows, and a page already open is framed without a click. `preview_design` draws a schematic page or a UCI page from the file, without Designer.
+- `lua_test` simulates TcpSocket, UdpSocket, HttpClient, rapidjson / json, System, Design, Notifications, Uci and Crypto (Base64), and runs a plugin (.qplug) as Designer does: design-time functions with its properties (layout entries without a control are reported), then its runtime code.
+- UCIs: page navigation (`navigation`, `tab_style`, `navigation_size`...), `image` elements (PNG, JPG, GIF, BMP, SVG), `page_link` touch areas, buttons drawn with images. The test UCI declares its navigation bar.
+- Real Core: `compare_with_core` (which design runs, every stored value against the Core), `pull_core_snapshots` (snapshots made on site read back over QRC, the room put back as it was, and recorded into a copy of the design), `send_to_core` and `load_from_core` (Designer's Save to Core & Run and Load from Core & Connect, only with `confirm=True`; a Core that doesn't answer is given up on with the reason).
+- Templates `divisible_room` (two rooms and a movable wall) and `paging_bgm` (music ducked by paging, two zones). Templates share the Core's inputs as `FLEX_IN` (was `MICS` in `conference_core_aec`).
+- Automatic layout counts the pins a block will show (highest pin wired, all channels of a Flex block), so a note under a multi-channel I/O block is no longer drawn under the block.
+
 ## 0.5.0 (2026-10-22)
 
 - `check_simpl`: what a Crestron SIMPL program expects of the design, read from the program itself. Module instances, parameters and wired joins come from the `.smw`, their meaning from the modules' `.usp` (QscQsys library described: Fader, Meter, Camera, Snapshot Controller, Generic Boolean/Integer/String Component Control; others can be described), and the resulting contract is checked like `check_contract`.

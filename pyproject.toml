@@ -1,6 +1,6 @@
 [project]
 name = "qsys-designer-mcp"
-version = "0.5.0"
+version = "0.6.0"
 description = "Unofficial MCP server that builds, reads, checks and emulates Q-SYS Designer designs"
 readme = "README.md"
 license = "MIT"
