@@ -53,9 +53,17 @@ async def emulate(designer: Designer, qrc: QrcClient, path: str, test_copy: bool
     target = make_test_copy(path) if test_copy else os.path.abspath(path)
     opened = await asyncio.to_thread(designer.open_design, target, discard_changes)
     started = await asyncio.to_thread(designer.emulate)
+    # The license notice (OK only) is noted and acknowledged; "Core Status: Compiling Design..." is
+    # progress, not a question, so wait for it to go away. They come in either order.
     notices = []
-    if any(designer.is_license_notice(d) for d in started["dialogs"]):
-        notices = await asyncio.to_thread(designer.ack_license_notices)   # OK-only notice: note it, carry on
+    deadline = time.time() + 300
+    while started["dialogs"] and time.time() < deadline:
+        if any(designer.is_license_notice(d) for d in started["dialogs"]):
+            notices += await asyncio.to_thread(designer.ack_license_notices)
+        elif all(d.get("title") == "Core Status" for d in started["dialogs"]):
+            await asyncio.sleep(1)
+        else:
+            break
         started["dialogs"] = await asyncio.to_thread(designer.dialogs)
     if started["dialogs"]:
         return {"opened": opened, "emulating": False, "dialogs": started["dialogs"],

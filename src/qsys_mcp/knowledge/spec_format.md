@@ -41,7 +41,7 @@ Each component needs exactly one of `class` or `inventory`.
 | `values` | Stored control values: `{"gain": -6, "mute": true, "frequency": 100}`. Numbers, booleans or strings. Use `{"value": v, "position": p}` to give the 0..1 position yourself. |
 | `text_controller` | For `device_controller_script` only: `{"controls": [...], "lua": "..."}`, or `"lua_file"` relative to `spec_dir`. |
 | `control_pins` | Control ids to expose as control pins (Properties > Control Pins), e.g. `["connected", "active"]` on a USB Speakerphone In, `["camera_status"]` on a camera. Wire them by pin name or by control id: `"USB_IN.out.connected"`. |
-| `plugin` | Instead of `class`: an installed schematic plugin, by its name (`"Category~Name"` or just `"Name"`) or id. It's looked for in Designer's Plugins and Assets folders under Documents\QSC. `plugin_file` takes a `.qplug` path instead. The plugin's code is saved inside the design. |
+| `plugin` | Instead of `class`: an installed schematic plugin, by its name (`"Category~Name"` or just `"Name"`) or id. It's looked for in Designer's Plugins and Assets folders under Documents\QSC. Encrypted plugins installed by the Asset Manager (`.qplugx2`) go by their asset name, e.g. `"Shure Microflex Advance"`. `plugin_file` takes a `.qplug` path instead. The plugin's code is saved inside the design. |
 
 `probe_components` lists each class's `property_choices`, so you can see what a numbered property means (for example `bandwidth_q_factor`: 0 Bandwidth, 1 Q-Factor).
 

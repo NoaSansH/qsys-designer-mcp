@@ -410,15 +410,29 @@ static class QsysHelper
         {
             var docs = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
             foreach (var dir in new[] { Path.Combine(docs, "QSC", "Q-Sys Designer", "Plugins"), Path.Combine(docs, "QSC", "Q-Sys Designer", "Assets") })
-                if (Directory.Exists(dir)) files.AddRange(Directory.GetFiles(dir, "*.qplug", SearchOption.AllDirectories));
+                if (Directory.Exists(dir)) files.AddRange(Directory.GetFiles(dir, "*.qplug*", SearchOption.AllDirectories)
+                    .Where(f => f.EndsWith(".qplug") || f.EndsWith(".qplugx") || f.EndsWith(".qplugx2")));
         }
         var want = (string)plugin;
         var seen = new List<string>();
         foreach (var f in files)
         {
-            var text = File.ReadAllText(f);
-            var name = System.Text.RegularExpressions.Regex.Match(text, "Name\\s*=\\s*\"([^\"]+)\"").Groups[1].Value;
-            var id = System.Text.RegularExpressions.Regex.Match(text, "Id\\s*=\\s*\"([^\"]+)\"").Groups[1].Value;
+            string name, id;
+            if (f.EndsWith(".qplug"))
+            {
+                var text = File.ReadAllText(f);
+                name = System.Text.RegularExpressions.Regex.Match(text, "Name\\s*=\\s*\"([^\"]+)\"").Groups[1].Value;
+                id = System.Text.RegularExpressions.Regex.Match(text, "Id\\s*=\\s*\"([^\"]+)\"").Groups[1].Value;
+            }
+            else
+            {
+                // Asset Manager plugins are encrypted: name them after their asset folder,
+                // e.g. ...\Shure-Microflex-Advance.1.1.0.0\content\x.qplugx2 -> "Shure Microflex Advance"
+                var dir = Path.GetDirectoryName(f);
+                if (Path.GetFileName(dir) == "content") dir = Path.GetDirectoryName(dir);
+                name = System.Text.RegularExpressions.Regex.Replace(Path.GetFileName(dir), "(\\.\\d+)+$", "").Replace('-', ' ');
+                id = Path.GetFileNameWithoutExtension(f);
+            }
             seen.Add(name);
             var shortName = name.Contains("~") ? name.Substring(name.LastIndexOf('~') + 1) : name;
             if (pluginFile == null && !(string.Equals(want, name, StringComparison.OrdinalIgnoreCase) ||
