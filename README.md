@@ -25,6 +25,7 @@ An MCP server that lets Claude, or any other MCP client, build Q-SYS designs. Yo
 - **Edit a saved design** operation by operation (`edit_design`): move, rewire, set a value or a plugin's IP, add or remove blocks, without rebuilding and without losing snapshot contents.
 - **Read any design back,** including ones it didn't build: components, properties, stored values, pins, wires and UCIs, and what each snapshot sets (`read_snapshots`), straight from the file without emulation.
 - **Check signal flow statically** over the real wiring, for example "mic 1 reaches the USB send", "the laptop never reaches the far end", "the echo canceller's reference carries the far end", or "no unconnected pins".
+- **Picture a design without Designer** (`preview_design`): a schematic page or a UCI page drawn from the file, to check a layout without opening anything.
 - **Check a design against a control system's needs** (`check_contract`, or `check_simpl` straight from a SIMPL program), **document it** as an HTML page with every setting and what each snapshot sets (`document_design`), **compare two versions** (`compare_designs`) and **generate a test UCI** (`make_test_uci`).
 - **Test Lua outside Designer** (`lua_test`): a Text Controller's script runs against simulated controls, blocks and timers, in milliseconds.
 - **Templates**: reusable spec fragments included with a prefix, parameters and an offset, and a library of ready-made ones (`list_templates`): conference room with a USB PC and a Dante mic that cancels echo itself, conference room with the AEC in the Core, speaker zone.
@@ -112,9 +113,9 @@ Designer has no public API for editing designs. It does ship as a .NET program, 
 - **Designer 9.x (.NET Framework):** the helper is compiled from the C# source in [`src/qsys_mcp/helper`](src/qsys_mcp/helper) on first use. It uses the compiler that comes with Windows, and is built against the Designer version you have.
 - **Designer 10.x (.NET 8):** a prebuilt helper is used. It loads Designer purely by reflection, and runs on the same .NET runtime as Designer.
 
-Each tool call runs the helper once with a JSON request. Nothing from QSC is included in this repo or the package.
+The helper takes JSON requests. One helper process per Designer version stays open and answers them in turn, so Designer's libraries load once: reading a design takes a quarter of a second after the first call. `QSYS_MCP_PERSISTENT=0` runs one process per request instead. Nothing from QSC is included in this repo or the package.
 
-The Designer app itself is only used to run designs: opening, emulating, stopping, answering dialogs and taking screenshots. Menus and dialog buttons are pressed through Windows UI Automation, so the server doesn't move your mouse or type. The one exception is `screenshot` with a `view`: Designer's Design Elements panel has no UI Automation, so opening a page or a UCI takes a click, and only while Designer is the window in front (otherwise it stops and says so). Screenshots are likewise refused when Designer isn't in front, so another application is never captured. Designer opens every file in its own window, so `open_design` and `emulate_design` close the running Designer first, so there's only ever one open. If a design has unsaved changes, they stop and say so instead.
+The Designer app itself is only used to run designs: opening, emulating, stopping, answering dialogs and taking screenshots. Menus and dialog buttons are pressed through Windows UI Automation, so the server doesn't move your mouse or type, and screenshots are drawn from Designer's own window, so Designer can stay behind the window you're working in and nothing else is ever captured. The one exception is `screenshot` with a `view` that isn't already shown: Designer's Design Elements panel has no UI Automation, so opening another page or a UCI takes a click, and only while Designer is the window in front (otherwise it stops and says so). `preview_design` draws a schematic page or a UCI page from the file without Designer at all. Designer opens every file in its own window, so `open_design` and `emulate_design` close the running Designer first, so there's only ever one open. If a design has unsaved changes, they stop and say so instead.
 
 ### Stored values
 
@@ -147,7 +148,7 @@ Because it relies on undocumented internals, any Designer update could break it.
 |---|---|
 | Learn | `designer_versions`, `probe_components`, `list_templates` |
 | Build, edit and check | `build_design`, `edit_design`, `read_design`, `read_snapshots`, `list_controls`, `check_design`, `check_contract`, `check_simpl`, `audit_design`, `designer_check`, `learn_block_sizes` |
-| Document | `document_design`, `compare_designs`, `make_test_uci` |
+| Document | `document_design`, `compare_designs`, `make_test_uci`, `preview_design` |
 | Run | `designer_status`, `open_design`, `close_design`, `emulate_design`, `stop_emulation`, `list_dialogs`, `dialog_button`, `screenshot` |
 | Stored values and snapshots | `calibrate_values`, `record_snapshots` |
 | Runtime (QRC) | `run_scenario`, `qrc_connect`, `save_snapshot_live`, `qrc_status`, `qrc_list_components`, `qrc_get_controls`, `qrc_set_control`, `qrc_named_controls`, `qrc_set_named_control`, `qrc_watch` |

@@ -380,14 +380,38 @@ def dialog_button(button: str) -> str:
 @tool(READ_ONLY, image=True)
 def screenshot(view: str | None = None, name: str | None = None, page: str | None = None,
                save_to: str | None = None) -> Image:
-    """Picture of the Designer window (brought to the front). The image is sent to the model.
-    view='schematic' (name = page title) or view='uci' (name = UCI, optional page) first opens that
-    page fitted to the window; this clicks Designer's Design Elements panel, which has no UI Automation.
+    """Picture of the Designer window, drawn from the window itself: Designer can stay behind other
+    windows. The image is sent to the model. view='schematic' (name = page title) or view='uci' (name =
+    UCI, optional page) first shows that page fitted to the window; opening a page other than the one
+    shown, or a UCI, clicks Designer's Design Elements panel (no UI Automation there), so Designer is
+    brought to the front for that click. preview_design draws a page without Designer at all.
     In Designer 10.5 the View zoom commands don't reach the UCI editor, so a UCI shows at 100 %.
     save_to also writes the PNG to that path."""
     if view:
         designer.show_view(view, name or "", page)
     data = designer.screenshot()
+    if save_to:
+        with open(save_to, "wb") as fh:
+            fh.write(data)
+    return Image(data=data, format="png")
+
+
+@tool(READ_ONLY, image=True)
+def preview_design(path: str, view: str = "schematic", name: str | None = None, page: str | None = None,
+                   save_to: str | None = None) -> Image:
+    """Picture of a schematic page (view='schematic', name = page title, default the first) or a UCI page
+    (view='uci', name = UCI, page) drawn from the saved file, without Designer: blocks with their labels,
+    pins and signal names, wires (links made by signal name only are shown as their names), group boxes
+    and notes; UCI buttons, faders, meters, knobs, LEDs, texts and group boxes. Close to Designer's
+    drawing, not identical (pins are spread evenly): for checking a layout. save_to also writes the PNG."""
+    from qsys_mcp import preview
+    design = designs.read(path)
+    if view == "schematic":
+        data = preview.schematic(design, name)
+    elif view == "uci":
+        data = preview.uci(design, name, page)
+    else:
+        raise ValueError("view must be 'schematic' or 'uci'")
     if save_to:
         with open(save_to, "wb") as fh:
             fh.write(data)

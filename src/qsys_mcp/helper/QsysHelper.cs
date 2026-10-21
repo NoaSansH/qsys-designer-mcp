@@ -1205,7 +1205,9 @@ static partial class QsysHelper
             {
                 var pos = (System.Windows.Point)Q.Get(g, "Position"); var size = (System.Windows.Size)Q.Get(g, "Size");
                 graphics.Add(new JObject { { "type", g.GetType().Name == "GroupBox" ? "group" : "text" }, { "page", Convert.ToString(Q.Get(page, "Title")) },
-                    { "x", pos.X }, { "y", pos.Y }, { "w", size.Width }, { "h", size.Height }, { "text", Convert.ToString(Q.Get(g, "Label")) } });
+                    { "x", pos.X }, { "y", pos.Y }, { "w", size.Width }, { "h", size.Height }, { "text", Convert.ToString(Q.Get(g, "Label")) },
+                    { "fill", Convert.ToString(Q.TryGet(g, "Fill")) }, { "text_color", Convert.ToString(Q.TryGet(g, "TextColor")) },
+                    { "font_size", Convert.ToDouble(Q.TryGet(g, "FontSize") ?? 12.0) }, { "bold", Convert.ToString(Q.TryGet(g, "Face")) == "Bold" } });
             }
         res["graphics"] = graphics;
 

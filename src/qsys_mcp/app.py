@@ -1,13 +1,16 @@
 """Running designs in the Q-SYS Designer app: open, emulate, stop, answer dialogs, screenshot.
 
 Nothing here edits a design (that's all headless). Menus and dialog buttons are driven through
-UI Automation patterns (expand / invoke), so no mouse or keyboard input is injected.
+UI Automation patterns (expand / invoke), so no mouse or keyboard input is injected, and screenshots
+are taken from Designer's own window (PrintWindow): both work with Designer behind other windows.
+Only opening a page or a UCI from the Design Elements panel needs a click, and so Designer in front.
 Designer opens each file in its own process, so this keeps one Designer running at a time.
 """
 
 from __future__ import annotations
 
 import ctypes
+import ctypes.wintypes as wt
 import io
 import os
 import re
@@ -385,14 +388,25 @@ class Designer:
                 time.sleep(0.5)
         raise AppError(f"Could not open {item!r} from {header!r}")
 
+    PANELS = ("Design Elements", "Properties", "Schematic Elements", "Inventory", "Inspector")
+
+    def _open_tabs(self) -> list[str]:
+        """Titles of the open schematic pages and UCIs (the docked panels' tabs left out)."""
+        return [t.window_text() for t in self.window().descendants(control_type="TabItem")
+                if t.window_text() not in self.PANELS]
+
     def show_view(self, kind: str, name: str, page: str | None = None, fit: bool = True) -> dict:
-        """Bring a schematic page (kind 'schematic', name = page title) or a UCI (kind 'uci', name =
-        UCI name, optional page) to the front, fitted to the window."""
-        win = self.window()
-        win.set_focus()
-        if kind == "schematic":
+        """Show a schematic page (kind 'schematic', name = page title) or a UCI (kind 'uci', name =
+        UCI name, optional page), fitted to the window. A page that is the only one open is shown as it
+        is; any other view is opened from the Design Elements panel, which takes a click (Designer in front)."""
+        tabs = self._open_tabs()
+        if kind == "schematic" and tabs == [name]:
+            pass
+        elif kind == "schematic":
+            self.window().set_focus()
             self._open_from_panel("Schematic Pages", name)
         elif kind == "uci":
+            self.window().set_focus()
             self._open_from_panel("User Control Interfaces", name)
             if page:
                 self._click_text(page)
@@ -407,16 +421,55 @@ class Designer:
         return {"shown": kind, "name": name, "page": page, "title": self.window().window_text()}
 
     # ---- screenshot ------------------------------------------------------------------------
+    @staticmethod
+    def _print_window(hwnd: int, width: int, height: int):
+        """The window's own content, drawn by Windows into a bitmap, whatever covers it on screen."""
+        from PIL import Image
+        u32, g32 = ctypes.windll.user32, ctypes.windll.gdi32
+        hdc = u32.GetWindowDC(hwnd)
+        mdc = g32.CreateCompatibleDC(hdc)
+        bmp = g32.CreateCompatibleBitmap(hdc, width, height)
+        g32.SelectObject(mdc, bmp)
+        try:
+            if not u32.PrintWindow(hwnd, mdc, 2):          # PW_RENDERFULLCONTENT
+                return None
+
+            class BIH(ctypes.Structure):
+                _fields_ = [("biSize", wt.DWORD), ("biWidth", wt.LONG), ("biHeight", wt.LONG), ("biPlanes", wt.WORD),
+                            ("biBitCount", wt.WORD), ("biCompression", wt.DWORD), ("biSizeImage", wt.DWORD),
+                            ("biXPelsPerMeter", wt.LONG), ("biYPelsPerMeter", wt.LONG), ("biClrUsed", wt.DWORD),
+                            ("biClrImportant", wt.DWORD)]
+
+            bi = BIH(ctypes.sizeof(BIH), width, -height, 1, 32, 0, 0, 0, 0, 0, 0)
+            buf = ctypes.create_string_buffer(width * height * 4)
+            if not g32.GetDIBits(mdc, bmp, 0, height, buf, ctypes.byref(bi), 0):
+                return None
+            img = Image.frombuffer("RGB", (width, height), buf, "raw", "BGRX", 0, 1)
+            return img if img.getbbox() else None            # all black: nothing was drawn
+        finally:
+            g32.DeleteObject(bmp)
+            g32.DeleteDC(mdc)
+            u32.ReleaseDC(hwnd, hdc)
+
     def screenshot(self) -> bytes:
-        """PNG of the Designer window (brought to the front first; refused if it can't be)."""
-        import mss
+        """PNG of the Designer window. It's drawn from the window itself, so Designer can stay behind
+        other windows; a minimized Designer is restored behind them. If Windows can't draw it that way,
+        the screen is grabbed instead, and only with Designer in front."""
         from PIL import Image
         win = self.window()
-        self._ensure_front()   # the grab is of the screen: never capture another application
+        u32 = ctypes.windll.user32
+        if win.is_minimized():
+            u32.ShowWindow(win.handle, 4)                      # SW_SHOWNOACTIVATE
+            u32.SetWindowPos(win.handle, 1, 0, 0, 0, 0, 0x13)  # HWND_BOTTOM, NOSIZE | NOMOVE | NOACTIVATE
+            time.sleep(1)
         r = win.rectangle()
-        with mss.mss() as sct:
-            raw = sct.grab({"left": r.left, "top": r.top, "width": r.width(), "height": r.height()})
-        img = Image.frombytes("RGB", raw.size, raw.bgra, "raw", "BGRX")
+        img = self._print_window(win.handle, r.width(), r.height())
+        if img is None:
+            import mss
+            self._ensure_front()   # the grab is of the screen: never capture another application
+            with mss.mss() as sct:
+                raw = sct.grab({"left": r.left, "top": r.top, "width": r.width(), "height": r.height()})
+            img = Image.frombytes("RGB", raw.size, raw.bgra, "raw", "BGRX")
         if img.width > MAX_SHOT_WIDTH:
             img = img.resize((MAX_SHOT_WIDTH, round(img.height * MAX_SHOT_WIDTH / img.width)), Image.LANCZOS)
         buf = io.BytesIO()
