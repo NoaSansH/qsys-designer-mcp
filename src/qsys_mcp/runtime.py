@@ -192,7 +192,94 @@ async def record_snapshots(designer: Designer, qrc: QrcClient, path: str, snapsh
     await asyncio.sleep(2)
     await asyncio.to_thread(designer.close_designs, True)   # our own test copy, saved just above
     res = headless.run({"command": "copy_snapshots", "from": copy_path, "path": path, "banks": list(snapshots)}, inst)
+    from qsys_mcp import layout
+    layout.learn_sizes(inst, designs.read(copy_path))   # Designer just drew and saved every block
     missing = {b: sorted(set(n) - set(res["copied"].get(b, []))) for b, n in saved.items()}
     missing = {b: n for b, n in missing.items() if n}
     return {"path": path, "saved_in_emulation": saved, "copied_into_design": res["copied"],
             "not_copied": missing, "problems": problems}
+
+
+SCENARIO_ACTIONS = ("set", "load", "wait", "expect")
+
+
+def _close_enough(got, want, tol: float) -> bool:
+    if isinstance(want, bool):
+        return got is not None and bool(round(float(got))) == want
+    if isinstance(want, (int, float)):
+        return got is not None and abs(float(got) - float(want)) <= tol
+    return got == want
+
+
+async def _control(qrc: QrcClient, component: str, control: str) -> dict:
+    return (await qrc.get(component, [control]))["Controls"][0]
+
+
+async def run_scenario(designer: Designer, qrc: QrcClient, path: str, steps: list[dict],
+                       discard_changes: bool = False, keep_running: bool = False) -> dict:
+    """Emulate a test copy and run steps in order, each with one action:
+      {"set": {"component", "control", "value"}}            set a control (a trigger: value 1)
+      {"load": {"controller", "snapshot": n}}                recall a snapshot (load_n of a Snapshot Controller)
+      {"wait": seconds}
+      {"expect": {"component", "control", "value" | "string", "tolerance"?}}
+    Any step may have a "label". Every expect is reported; the run carries on after a failure."""
+    problems = []
+    for i, s in enumerate(steps):
+        acts = [a for a in SCENARIO_ACTIONS if a in s]
+        if len(acts) != 1:
+            problems.append(f"steps[{i}]: give exactly one of {', '.join(SCENARIO_ACTIONS)}")
+    if problems:
+        raise ValueError("scenario problems:\n- " + "\n- ".join(problems))
+    run = await emulate(designer, qrc, path, test_copy=True, discard_changes=discard_changes)
+    if not run.get("emulating"):
+        return {"path": path, "stopped_at": "emulate", **run}
+    results, failed = [], 0
+    try:
+        await asyncio.sleep(2)   # let scripts start
+        for i, s in enumerate(steps):
+            label = s.get("label") or ""
+            if "set" in s:
+                a = s["set"]
+                await qrc.set(a["component"], a["control"], a["value"])
+                await asyncio.sleep(0.3)
+                results.append({"step": i, "label": label, "set": f"{a['component']}.{a['control']}={a['value']}"})
+            elif "load" in s:
+                a = s["load"]
+                await qrc.set(a["controller"], f"load_{a['snapshot']}", 1)
+                await asyncio.sleep(1.0)
+                results.append({"step": i, "label": label, "load": f"{a['controller']} {a['snapshot']}"})
+            elif "wait" in s:
+                await asyncio.sleep(float(s["wait"]))
+            else:
+                a = s["expect"]
+                c = await _control(qrc, a["component"], a["control"])
+                if "string" in a:
+                    ok, got, want = c.get("String") == a["string"], c.get("String"), a["string"]
+                else:
+                    want, got = a["value"], c.get("Value")
+                    ok = _close_enough(got, want, float(a.get("tolerance", 1e-3)))
+                failed += not ok
+                results.append({"step": i, "label": label, "expect": f"{a['component']}.{a['control']}", "want": want,
+                                "got": got, "string": c.get("String"), "pass": ok})
+    finally:
+        if not keep_running:
+            await asyncio.to_thread(designer.stop)
+            await asyncio.to_thread(designer.close_designs, True)   # our own test copy
+    checks = [r for r in results if "pass" in r]
+    return {"path": path, "checks": len(checks), "passed": len(checks) - failed, "failed": failed,
+            "failures": [r for r in checks if not r["pass"]], "steps": results}
+
+
+async def learn_block_sizes(designer: Designer, path: str, discard_changes: bool = False) -> dict:
+    """Open a test copy of the design in Designer, save it (Designer then records each block's real
+    size) and remember those sizes for automatic layout."""
+    from qsys_mcp import layout
+    path = os.path.abspath(path)
+    inst = headless.pick(for_file=path)
+    copy_path = make_test_copy(path)
+    await asyncio.to_thread(designer.open_design, copy_path, discard_changes)
+    await asyncio.to_thread(designer.menu, "File->Save")
+    await asyncio.sleep(2)
+    await asyncio.to_thread(designer.close_designs, True)
+    n = layout.learn_sizes(inst, designs.read(copy_path))
+    return {"path": path, "blocks_learned": n}

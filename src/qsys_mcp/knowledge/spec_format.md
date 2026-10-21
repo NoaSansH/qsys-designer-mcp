@@ -123,21 +123,64 @@ Notes and group boxes on the schematic:
 ## ucis
 
 ```json
-{"name": "Touch Panel", "pages": [{"name": "Main", "color": "#FF1C1D21", "elements": [
+{"name": "Touch Panel", "width": 1280, "height": 800, "pages": [{"name": "Main", "color": "#FF1C1D21", "elements": [
   {"type": "text", "text": "ROOM VOLUME", "x": 30, "y": 320, "w": 300, "h": 30, "color": "#FFFFFFFF", "font_size": 18, "align": "Left"},
   {"type": "control", "component": "ROOM_MODE", "control": "MasterVolume", "x": 40, "y": 360, "w": 90, "h": 400,
    "style": "Fader", "color": "#FFD6D9DE"},
   {"type": "control", "component": "ROOM_MODE", "control": "MeetingMode", "x": 30, "y": 130, "w": 320, "h": 110,
-   "label": "MEETING", "color": "#FF2E7D32", "off_color": "#FF3A3B40", "text_color": "#FFFFFFFF", "font_size": 24, "corner_radius": 10}
+   "label": "MEETING", "color": "#FF2E7D32", "off_color": "#FF3A3B40", "text_color": "#FFFFFFFF", "font_size": 24, "corner_radius": 10},
+  {"type": "group_box", "text": "MODE", "x": 20, "y": 95, "w": 340, "h": 160, "font_size": 14, "bold": true, "color": "#FF9AA0A6",
+   "fill": "#20FFFFFF", "stroke": "#FF3A3B40", "stroke_width": 1, "corner_radius": 8},
+  {"type": "header", "text": "AUDIO", "x": 30, "y": 275, "w": 1030, "h": 30, "font_size": 16, "color": "#FF9AA0A6", "align": "Center"}
 ]}]}
 ```
 
+- `width` and `height` set the UCI's size in pixels. Give both, or neither to keep Designer's default. When they change the size, the builder also sets the panel type to Custom, the orientation (portrait when `height` is more than `width`) and the aspect ratio that matches, e.g. 16:10 for 1280 × 800. `build_design` reports the size each UCI ended up with under `uci_sizes`.
+- Element `type`s are `control` (the default), `text`, `group_box` (a frame with an optional title) and `header` (a title with a line).
+- `group_box` and `header` take `x`, `y`, `w`, `h`, `text`, `font_size`, `bold`, `color` (the text colour) and `align` (`Left`, `Center` or `Right`). A `group_box` also takes `fill`, `stroke`, `stroke_width` (whole pixels) and `corner_radius`. Leave a key out to keep Designer's default; without `text` there's no title.
 - `style` values include `Button`, `Knob`, `Fader`, `Text`, `Meter` and `Led`. If you leave it out, the control's default style is used.
 - Colours are `#AARRGGBB`.
-- Elements are drawn in list order, with later ones on top.
+- Elements are drawn in list order, with later ones on top. Group boxes are the exception: each page adds its group boxes first, so they get its lowest ZOrder and sit behind its other elements wherever they are in the list. Among themselves they keep list order, so list an outer box before the boxes inside it.
 - UCIs don't need Script Access.
-- Don't put graphic boxes behind controls: Designer draws them on top.
+- Graphics drawn behind controls may still cover them: Designer has drawn graphic boxes on top of controls before. Open a page with group boxes in Designer to check it, and give a box under controls a translucent `fill` (alpha below `FF`), so the controls stay visible either way.
 - A Lua script can set a button's text at runtime with `Controls.X.Legend = "..."`. For that to show, leave `label` unset.
+
+## Automatic layout
+
+Blocks can be placed for you, along the signal flow:
+
+```json
+"layout": "auto",
+"zones": {"INPUTS": {"fill": "#40D32F2F", "text": "Sources around -20 dBFS"}},
+"components": [{"name": "MIC", "class": "gain", "zone": "INPUTS", "note": "Ceiling mic, AEC in the mic"}, ...]
+```
+
+- `layout`: `"auto"` places every block; without it, only blocks that have no `x`/`y` are placed. `{"mode": "auto", "x": 40, "y": 40, "column_gap": 110, "row_gap": 30, "note_width": 150}` tunes it.
+- Blocks go in columns by their distance from the sources over the wires and signals (loops are cut), and each column is ordered to limit crossings. Blocks of the same `zone` stay together; each zone gets a titled group box around its blocks, styled from `zones` (`fill`, `text`).
+- `note` on a block puts a note under it (also with blocks you placed yourself).
+- Block sizes come from what Designer actually drew for that kind of block, learned by `learn_block_sizes` and by `record_snapshots`; otherwise they're estimated from the label and the pins. Keep labels short: Designer cuts long ones.
+
+## Editing a design
+
+`edit_design` changes a saved file without rebuilding it, so everything else stays, snapshot contents included. Operations run in order:
+
+| op | keys |
+|---|---|
+| `set_value` | `component`, `control`, `value` (optional `position`) |
+| `set_values` | `component`, `values` {control: value} |
+| `set_property` | `component`, `property`, `value`; wires to pins that disappear are removed and reported |
+| `move` | `component` (or a note's `text`), `x`/`y` or `dx`/`dy` |
+| `set_label`, `set_access`, `rename` | `component` and `label` / `script_access` / `name` |
+| `set_lua` | `component`, `lua` |
+| `add_control_pins` | `component`, `controls` |
+| `add_inventory`, `set_usb_bridge`, `set_design_properties` | `item` (an inventory spec) / `item` + `settings` / `settings` |
+| `add_component`, `remove_component` | `component` (a component spec / a name); removing also drops its wires and snapshot entries |
+| `add_wire`, `remove_wire` | `from`, `to` (and `signal` to name it) |
+| `add_signal`, `rename_signal`, `remove_signal` | `from`, `to`, `signal` / `signal`, `name` / `pin` or `signal` |
+| `add_graphic`, `set_graphic`, `remove_graphic` | `graphic` (as in `graphics`) / `text` + `set` / `text` |
+| `add_snapshot_bank` | `bank` (as in `snapshot_banks`); fill it with `record_snapshots` |
+
+Plugin blocks keep working in a saved design: their code is in the file, so their controls are available to `set_value` without the plugin being installed.
 
 ## Checking a design
 
@@ -146,4 +189,6 @@ Two tools check a built design:
 - `read_design` reads a saved file back.
 - `check_design` runs static checks on it: unique names, unconnected pins, stored positions, and signal paths. Signal paths are written as `{"from": "FLEX_IN.out.3", "to": "USB_TX_CONF", "expect": false}`, with optional `via: [...]`. An AEC's Reference input counts as subtracted, not passed through.
 
-For control logic, use `emulate_design` and then the `qrc_*` tools. Emulation has no audio: it can test control state, but not whether sound actually gets through.
+`designer_check` runs Designer's own Check Design and returns its errors, warnings and the licences the design needs.
+
+For control logic, write a `run_scenario`: it emulates a test copy and runs steps such as `{"load": {"controller": "MODES", "snapshot": 3}}` then `{"expect": {"component": "MIC_MUTE", "control": "mute", "value": false}}`, and reports each expectation. `emulate_design` and the `qrc_*` tools are there for exploring by hand. Emulation has no audio: it can test control state, but not whether sound actually gets through.

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.0 (2026-10-21)
+
+- `edit_design`: changes a saved design operation by operation (values, properties, moves, blocks, wires, signal names, notes, snapshot banks) without rebuilding it, so snapshot contents and UCIs stay.
+- `designer_check`: Designer's own Check Design, with its errors, warnings and licences.
+- `run_scenario`: scripted tests in emulation (set, recall a snapshot, wait, expect), reported step by step.
+- Automatic layout (spec `layout`, `zone`, `note`): blocks in columns along the signal flow, zone frames and notes; block sizes learned from Designer (`learn_block_sizes`, `record_snapshots`).
+- `screenshot` can open a schematic page or a UCI first, fitted to the window. Clicks and screenshots are refused unless Designer is the window in front.
+- UCIs: size, group boxes and headers, taken from the outil-v0.2-distante branch with their tests.
+- A loaded design's plugin blocks get their controls back from the plugin code saved in the file (reading, editing, patching values).
+- Emulation waits for "Compiling Design" and acknowledges the licence notice in either order.
+
 ## 0.2.0 (2026-10-20)
 
 - Spec: USB bridge settings of the Core and of I/O-USB Bridges (`usb_bridge`: Speakerphone, EC mode, video bridge, bridge name), inventory items built from a model (cameras: `model`), and `design_properties` (PTP, QoS, Software Dante).

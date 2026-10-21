@@ -18,6 +18,9 @@ ACCESS = {"None", "External", "Script", "All"}
 NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_\-]*$")
 ENDPOINT_RE = re.compile(r"^(?P<name>.+)\.(?P<dir>in|out)\.(?P<pin>.+)$")
 # inputs that never pass signal to the block's outputs (the AEC subtracts its reference)
+COLOR_RE = re.compile(r"^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$")
+UCI_PIXELS = range(100, 8193)
+FRAME_ONLY = ("fill", "stroke", "stroke_width", "corner_radius")   # group_box keys a header doesn't have
 NON_PASSING = {("acoustic_echo_canceler_simd", "Reference"), ("acoustic_echo_canceler", "Reference")}
 
 
@@ -109,11 +112,61 @@ def validate(spec: dict, base_dir: str | Path | None = None) -> tuple[dict, list
                 problems.append(f"snapshot bank {b.get('name')}: controller name {code!r} must be a new, valid name")
             names.add(code)
     for u in spec.get("ucis", []):
+        problems += _uci_size_problems(u)
         for p in u.get("pages", []):
             for j, e in enumerate(p.get("elements", [])):
-                if e.get("type", "control") == "control" and e.get("component") not in names:
-                    problems.append(f"UCI {u.get('name')}/{p.get('name')} element {j}: no component {e.get('component')}")
+                where = f"UCI {u.get('name')}/{p.get('name')} element {j}"
+                kind = e.get("type", "control")
+                if kind == "control":
+                    if e.get("component") not in names:
+                        problems.append(f"{where}: no component {e.get('component')}")
+                elif kind in ("group_box", "header"):
+                    problems += _graphic_problems(where, kind, e)
+                elif kind != "text":
+                    problems.append(f"{where}: type must be control, text, group_box or header, not {kind!r}")
     return spec, problems
+
+
+def _is_int(v) -> bool:
+    return isinstance(v, int) and not isinstance(v, bool)
+
+
+def _is_number(v) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def _uci_size_problems(u: dict) -> list[str]:
+    where, size = f"UCI {u.get('name')}", {k: u[k] for k in ("width", "height") if k in u}
+    if len(size) == 1:
+        return [f"{where}: give both width and height, or neither"]
+    return [f"{where}: {k} must be a whole number of pixels from 100 to 8192, not {v!r}"
+            for k, v in size.items() if not _is_int(v) or v not in UCI_PIXELS]
+
+
+def _graphic_problems(where: str, kind: str, e: dict) -> list[str]:
+    """group_box and header keys: x, y, w, h, text, font_size, bold, color, align (+ the FRAME_ONLY ones)."""
+    problems = []
+    extra = [k for k in FRAME_ONLY if k in e] if kind == "header" else []
+    if extra:
+        problems.append(f"{where}: a header has no {', '.join(extra)} (a group_box does)")
+    for k in ("color", "fill", "stroke"):
+        if k in e and k not in extra and not (isinstance(e[k], str) and COLOR_RE.match(e[k])):
+            problems.append(f"{where}: {k} must be a colour like #AARRGGBB, not {e[k]!r}")
+    for k in ("x", "y", "w", "h", "font_size", "corner_radius"):
+        if k in e and k not in extra:
+            v = e[k]
+            if not _is_number(v) or (k in ("w", "h", "font_size") and v <= 0) or (k == "corner_radius" and v < 0):
+                rule = "a number" if k in ("x", "y") else "zero or more" if k == "corner_radius" else "more than zero"
+                problems.append(f"{where}: {k} must be {rule}, not {v!r}")
+    if "stroke_width" in e and "stroke_width" not in extra and not (_is_int(e["stroke_width"]) and e["stroke_width"] >= 0):
+        problems.append(f"{where}: stroke_width must be a whole number of pixels, not {e['stroke_width']!r}")
+    if "bold" in e and not isinstance(e["bold"], bool):
+        problems.append(f"{where}: bold must be true or false, not {e['bold']!r}")
+    if "align" in e and str(e["align"]).lower() not in ("left", "center", "right"):
+        problems.append(f"{where}: align must be Left, Center or Right, not {e['align']!r}")
+    if "text" in e and not isinstance(e["text"], str):
+        problems.append(f"{where}: text must be a string, not {e['text']!r}")
+    return problems
 
 
 def build(spec: dict, path: str, overwrite: bool = False, designer_version: str | None = None,
@@ -123,10 +176,12 @@ def build(spec: dict, path: str, overwrite: bool = False, designer_version: str 
         raise SpecError("path must end in .qsys")
     if os.path.exists(path) and not overwrite:
         raise FileExistsError(f"{path} exists. Pick a new file name, or pass overwrite=True if replacing it is intended.")
+    inst = headless.pick(designer_version)
+    from qsys_mcp import layout
+    spec = layout.auto_layout(spec, layout.load_sizes(inst))   # x/y for unplaced blocks, notes, zones
     prepared, problems = validate(spec, base_dir)
     if problems:
         raise SpecError("spec problems:\n- " + "\n- ".join(problems))
-    inst = headless.pick(designer_version)
     res = headless.run({"command": "build", "path": path, "overwrite": overwrite, "spec": prepared,
                         "positions": headless.load_positions(inst)}, inst)
     sources: dict[str, int] = {}
@@ -141,6 +196,51 @@ def build(spec: dict, path: str, overwrite: bool = False, designer_version: str 
                             "them on the engine (needs Designer's emulator), or check them at runtime over QRC.")
     res.pop("values", None) if len(res.get("values", [])) > 200 else None
     return res
+
+
+EDIT_OPS = {"set_value", "set_values", "set_property", "move", "set_label", "set_access", "rename", "set_lua", "add_control_pins",
+            "add_inventory", "set_usb_bridge", "set_design_properties", "add_component", "remove_component", "add_wire",
+            "remove_wire", "add_signal", "rename_signal", "remove_signal", "add_graphic", "set_graphic", "remove_graphic",
+            "add_snapshot_bank"}
+
+
+def edit(path: str, ops: list[dict], out_path: str | None = None, base_dir: str | None = None) -> dict:
+    """Apply edit operations to a saved design (see qsys://spec-format, "Editing a design"). Whatever the
+    operations don't touch is kept, snapshot contents included. Writes `path` unless out_path is given."""
+    path = os.path.abspath(path)
+    if not os.path.isfile(path):
+        raise FileNotFoundError(path)
+    if out_path and os.path.exists(out_path):
+        raise FileExistsError(f"{out_path} exists; pick a new file name or edit in place")
+    problems = []
+    if not isinstance(ops, list) or not ops:
+        problems.append("ops must be a non-empty list")
+    for i, op in enumerate(ops if isinstance(ops, list) else []):
+        kind = op.get("op") if isinstance(op, dict) else None
+        if kind not in EDIT_OPS:
+            problems.append(f"ops[{i}]: op must be one of {sorted(EDIT_OPS)}, not {kind!r}")
+        elif kind == "add_component":
+            name = (op.get("component") or {}).get("name")
+            if not name or not NAME_RE.match(name):
+                problems.append(f"ops[{i}]: the new component needs a valid name, not {name!r}")
+        elif kind == "set_lua" and "lua" in op:
+            from qsys_mcp import lua
+            chk = lua.check_syntax(op["lua"])
+            if not chk["ok"]:
+                problems.append(f"ops[{i}]: Lua syntax error: {chk.get('error')}")
+    for i, op in enumerate(ops if isinstance(ops, list) else []):
+        tc = isinstance(op, dict) and isinstance(op.get("component"), dict) and op["component"].get("text_controller")
+        if tc and "lua_file" in tc:
+            p = Path(tc["lua_file"]) if Path(tc["lua_file"]).is_absolute() or not base_dir else Path(base_dir) / tc["lua_file"]
+            tc["lua"] = p.read_text(encoding="utf-8")
+            del tc["lua_file"]
+    if problems:
+        raise SpecError("edit problems:\n- " + "\n- ".join(problems))
+    inst = headless.pick(for_file=path)
+    req = {"command": "edit", "path": path, "ops": ops, "positions": headless.load_positions(inst)}
+    if out_path:
+        req["out_path"] = os.path.abspath(out_path)
+    return headless.run(req, inst)
 
 
 def read(path: str, designer_version: str | None = None) -> dict:
@@ -166,12 +266,20 @@ def summarise(design: dict, components: list[str] | None = None, include: set[st
         d["wires"] = design["wires"] if not components else [w for w in design["wires"]
                                                              if any(w[0].startswith(n + ".") or w[1].startswith(n + ".") for n in components)]
     d["wire_count"] = len(design["wires"])
-    if "ucis" in include:
-        d["ucis"] = design["ucis"]
+    ucis = design.get("ucis", [])
+    d["ucis"] = ucis if "ucis" in include else [_uci_outline(u) for u in ucis]
     if "graphics" in include:
         d["graphics"] = design.get("graphics", [])
     d["snapshot_banks"] = design.get("snapshot_banks", [])
     return d
+
+
+def _uci_outline(u: dict) -> dict:
+    """A UCI without its elements: name, size, page names and how many elements there are."""
+    out = {k: u[k] for k in ("name", "width", "height") if k in u}
+    out["pages"] = [p.get("name") for p in u.get("pages", [])]
+    out["elements"] = sum(len(p.get("elements", [])) for p in u.get("pages", []))
+    return out
 
 
 # ---- signal checks ------------------------------------------------------------------------

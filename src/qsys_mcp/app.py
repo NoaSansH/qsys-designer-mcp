@@ -273,16 +273,129 @@ class Designer:
         time.sleep(1.5)
         return {"mode": self._mode(self.window()), "dialogs": self.dialogs()}
 
-    # ---- screenshot ------------------------------------------------------------------------
-    def screenshot(self) -> bytes:
-        """PNG of the Designer window (brought to the front first)."""
-        import mss
-        from PIL import Image
+    # ---- Check Design ---------------------------------------------------------------------
+    def check_design(self) -> dict:
+        """File > Check Design... and what its dialogs say. Problems are the lines that mention an
+        error or a warning; the resources report (DSP, network streams, licences) comes back as is."""
+        for attempt in range(5):   # right after opening, the File menu isn't populated yet
+            try:
+                self.menu("File->Check Design...")
+                break
+            except AppError:
+                if attempt == 4:
+                    raise
+                time.sleep(2)
+        dialogs, deadline = [], time.time() + 60
+        while time.time() < deadline:
+            time.sleep(1)
+            dialogs = self.dialogs()
+            if dialogs and not any(d["title"] == "Core Status" for d in dialogs):
+                break
+        out = {"dialogs": dialogs, "errors": [], "warnings": [], "licenses": []}
+        for d in dialogs:
+            texts = [t.strip() for t in d["text"] if t.strip()]
+            for t in texts:
+                low = t.lower()
+                if "error" in low and "0 error" not in low:
+                    out["errors"].append(t)
+                elif "warning" in low and "0 warning" not in low:
+                    out["warnings"].append(t)
+            if "Q-SYS Software License Type" in texts:
+                i = texts.index("Quantity or Type")
+                out["licenses"] = [t for t in texts[i + 1:] if not t.startswith("Q-SYS Reflect")][:12]
+        for d in dialogs:
+            for b in ("OK", "Close"):
+                if b in d["buttons"]:
+                    self.press(b)
+                    break
+        out["passed"] = not out["errors"]
+        return out
+
+    # ---- views -----------------------------------------------------------------------------
+    def _ensure_front(self) -> None:
+        """Clicks and screenshots act on whatever is on screen: refuse unless Designer is the window
+        in front, so nothing lands in (or captures) another application the user is working in."""
         win = self.window()
         if win.is_minimized():
             win.restore()
-        win.set_focus()
+        try:
+            win.set_focus()
+        except Exception:
+            pass
         time.sleep(0.3)
+        front = ctypes.windll.user32.GetForegroundWindow()
+        if front != win.handle:
+            buf = ctypes.create_unicode_buffer(256)
+            ctypes.windll.user32.GetWindowTextW(front, buf, 256)
+            raise AppError(f"Designer is not the window in front ({buf.value or 'another window'} is); "
+                           "nothing was clicked or captured. Bring Designer to the front, then try again.")
+
+    def _click_text(self, text: str, double: bool = False, within=None) -> None:
+        """Designer's Design Elements panels have no UI Automation patterns, so these few views are
+        opened with a mouse click on their label (the only place this module clicks), and only while
+        Designer is the window in front."""
+        scope = within or self.window()
+        hits = [e for e in scope.descendants() if e.window_text() == text and e.is_visible()]
+        if not hits:
+            raise AppError(f"Nothing labelled {text!r} is visible in Designer")
+        self._ensure_front()
+        el = hits[-1]
+        el.double_click_input() if double else el.click_input()
+        time.sleep(1.2)
+
+    def _open_from_panel(self, header: str, item: str) -> None:
+        """Expand a Design Elements section, then open one of its items. A click on the header can be
+        lost while Designer redraws, so it's retried until the item shows."""
+        win = self.window()
+
+        def tab_open() -> bool:
+            # the opened page gets a tab (a UCI's reads "UCI name: page"); the tabs have no selection pattern
+            return any((t.window_text() or "").startswith(item) for t in win.descendants(control_type="TabItem"))
+
+        for _ in range(3):
+            self._click_text(header)
+            deadline = time.time() + 5
+            while time.time() < deadline:
+                if any(e.window_text() == item and e.is_visible() for e in win.descendants(control_type="Text")):
+                    self._click_text(item, double=True)
+                    opened = time.time() + 10   # a UCI's editor takes a few seconds to open
+                    while time.time() < opened:
+                        if tab_open():
+                            time.sleep(1)
+                            return
+                        time.sleep(0.5)
+                    break
+                time.sleep(0.5)
+        raise AppError(f"Could not open {item!r} from {header!r}")
+
+    def show_view(self, kind: str, name: str, page: str | None = None, fit: bool = True) -> dict:
+        """Bring a schematic page (kind 'schematic', name = page title) or a UCI (kind 'uci', name =
+        UCI name, optional page) to the front, fitted to the window."""
+        win = self.window()
+        win.set_focus()
+        if kind == "schematic":
+            self._open_from_panel("Schematic Pages", name)
+        elif kind == "uci":
+            self._open_from_panel("User Control Interfaces", name)
+            if page:
+                self._click_text(page)
+        else:
+            raise AppError("kind must be 'schematic' or 'uci'")
+        if fit:
+            try:
+                self.menu("View->Fit To Screen")
+            except AppError:
+                pass
+            time.sleep(1)
+        return {"shown": kind, "name": name, "page": page, "title": self.window().window_text()}
+
+    # ---- screenshot ------------------------------------------------------------------------
+    def screenshot(self) -> bytes:
+        """PNG of the Designer window (brought to the front first; refused if it can't be)."""
+        import mss
+        from PIL import Image
+        win = self.window()
+        self._ensure_front()   # the grab is of the screen: never capture another application
         r = win.rectangle()
         with mss.mss() as sct:
             raw = sct.grab({"left": r.left, "top": r.top, "width": r.width(), "height": r.height()})
