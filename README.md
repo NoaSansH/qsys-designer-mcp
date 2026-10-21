@@ -33,6 +33,7 @@ An MCP server that lets Claude, or any other MCP client, build Q-SYS designs. Yo
 - **Audit a design** (`audit_design`): a mic reaching the speakers, a PC getting its own audio back, an AEC reference taken before the volume, unconnected blocks, limiter thresholds, blocks open to QRC, in the stored state and in every snapshot.
 - **Check in Designer and test scenarios.** `designer_check` runs Designer's Check Design; `run_scenario` emulates and checks control state step by step (recall a snapshot, expect values).
 - **Emulate and test.** It opens a test copy in Designer's emulator with every block visible to QRC, then reads and sets controls to test modes, mutes and script logic.
+- **Work with a real Core, with confirmations.** `compare_with_core` checks which design a Core runs and every stored value against it (read only); `pull_core_snapshots` brings snapshots made on site (camera positions...) back into a copy of the design, putting the room back as it was; `send_to_core` runs File > Save to Core & Run and `load_from_core` File > Load from Core & Connect, each only with `confirm=True`. Logins and the choice of Core stay the user's.
 - **Calibrate stored values.** It measures what the engine actually loads for each stored value and fixes the file if needed (more on why below).
 
 It works with Designer **9.x** and **10.x**, and is tested with **9.13.2 LTS** and **10.5.0** (which runs on .NET 10). Several versions can be installed side by side: a file is read and edited with the version that saved it, and new designs use the newest install unless `designer_version` (or `QSYS_DESIGNER_DIR`) says otherwise. Files are read with the version that saved them. New builds use the newest install unless you pick one.
@@ -151,6 +152,7 @@ Because it relies on undocumented internals, any Designer update could break it.
 | Document | `document_design`, `compare_designs`, `make_test_uci`, `preview_design` |
 | Run | `designer_status`, `open_design`, `close_design`, `emulate_design`, `stop_emulation`, `list_dialogs`, `dialog_button`, `screenshot` |
 | Stored values and snapshots | `calibrate_values`, `record_snapshots` |
+| Real Core | `compare_with_core`, `pull_core_snapshots`, `send_to_core`, `load_from_core` |
 | Runtime (QRC) | `run_scenario`, `qrc_connect`, `save_snapshot_live`, `qrc_status`, `qrc_list_components`, `qrc_get_controls`, `qrc_set_control`, `qrc_named_controls`, `qrc_set_named_control`, `qrc_watch` |
 | Lua | `lua_check`, `lua_test`, `new_plugin` |
 
@@ -164,6 +166,7 @@ There are three resources, `qsys://spec-format`, `qsys://lua-api` and `qsys://de
 - Snapshot contents are written in emulation (the engine signs its snapshot files), so the controls they hold must be settable there. Reading them needs no emulation.
 - Block sizes are Designer's own: a long label is cut, so keep labels short.
 - Designer must be in English. Only menu and dialog names depend on the language.
+- The real-Core tools were tested against Designer's emulator standing in for a Core, and `send_to_core` with no Core on the network (it gives up and says why). Designer finds a Core by the name in the design, so that name must be the real Core's.
 - Tested on Designer 9.13.2 LTS and 10.5.0. Other versions should work, but they use the same undocumented internals, so try them on a copy first.
 
 ## Development

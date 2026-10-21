@@ -515,6 +515,66 @@ async def save_snapshot_live(controller: str, number: int, values: list[dict] | 
 
 
 @tool(LIVE_READ)
+async def compare_with_core(path: str, components: list[str] | None = None) -> dict:
+    """Compare the Core the qrc_* tools point at (qrc_connect; the emulator by default) with a design file:
+    which design it runs (name and code), and every stored value of the file against the control on the
+    Core. Read only. Blocks whose Script Access keeps QRC out are listed, not compared."""
+    from qsys_mcp import live
+    return await live.compare(qrc, designs.read(path), components)
+
+
+@tool(LIVE_WRITE)
+async def pull_core_snapshots(path: str, banks: list[str] | None = None, numbers: list[int] | None = None,
+                              out_path: str | None = None, discard_changes: bool = False) -> dict:
+    """Bring snapshots made on site (camera positions, levels) back from the Core the qrc_* tools point
+    at: each snapshot of the design's banks is recalled in turn and its controls read, then the controls
+    are put back as they were. This recalls snapshots on a live system, so on a real Core it needs
+    qrc_connect(..., allow_changes=True), which the user must have asked for. Only blocks QRC can reach
+    (Script Access External or All) are read. With out_path, a copy of the design is written there with
+    those snapshots recorded into it (in emulation) and read back. Snapshots never saved are listed as empty."""
+    from qsys_mcp import live, snapshotdata
+    _check_write()
+    design = designs.read(path)
+    pulled = await live.pull_snapshots(qrc, design, banks, numbers)
+    out = {"core": qrc.host, "banks": pulled}
+    if out_path:
+        out_path = os.path.abspath(out_path)
+        if out_path == os.path.abspath(path):
+            raise ValueError("give out_path a new file: the design itself is kept as it is")
+        import shutil
+        shutil.copyfile(path, out_path)
+        todo = {b: {"controller": r["controller"], "snapshots": r["snapshots"]} for b, r in pulled.items() if r["snapshots"]}
+        rec = await runtime.record_snapshots(designer, emulator, out_path, todo, discard_changes) if todo else {}
+        out["written"] = {"path": out_path, "recorded": rec.get("copied_into_design"), "problems": rec.get("problems"),
+                          "read_back": snapshotdata.contents(out_path)}
+    return out
+
+
+@tool(APP_SAFE)
+def send_to_core(path: str, confirm: bool = False, discard_changes: bool = False, wait: float = 60) -> dict:
+    """Open a design in Designer and run File > Save to Core & Run: the Core named in the design gets
+    it and runs it, replacing what it runs. Only with confirm=True, which the user must have asked for.
+    Designer finds the Core by the design's Core name; a login, a choice of Core or a confirmation it
+    asks for is returned (list_dialogs / dialog_button), never answered here, and credentials are the
+    user's to type. If no Core answers within `wait` seconds the request is cancelled and that is said."""
+    if not confirm:
+        raise ValueError("Sending a design replaces what the Core runs: ask the user, then call again with confirm=True.")
+    opened = designer.open_design(path, discard_changes)
+    return {"opened": opened, "core_name": designs.read(path).get("core", {}).get("name"), **designer.send_to_core(wait)}
+
+
+@tool(APP_SAFE)
+def load_from_core(confirm: bool = False, wait: float = 60) -> dict:
+    """File > Load from Core & Connect in Designer: the design running on a Core opens connected, with the
+    snapshots saved on site. Save it from Designer (File > Save As) under a new name, then read_snapshots
+    or compare_designs work on that file. Only with confirm=True (it connects Designer to a live system);
+    the choice of Core and any login are shown as dialogs for the user."""
+    if not confirm:
+        raise ValueError("Connecting Designer to a Core goes live: ask the user, then call again with confirm=True.")
+    return designer.load_from_core(wait)
+
+
+@tool(LIVE_READ)
 async def qrc_status() -> Any:
     """Engine status of the emulating or running design (design name, state, platform)."""
     return await qrc.status()

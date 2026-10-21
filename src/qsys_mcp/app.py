@@ -271,6 +271,40 @@ class Designer:
         time.sleep(2)
         return {"mode": self._mode(self.window()), "dialogs": self.dialogs()}
 
+    def send_to_core(self, seconds: float = 30) -> dict:
+        """File > Save to Core & Run on the open design. Designer may then ask which Core, for a login (the
+        user's to type) or to confirm replacing the running design: those dialogs are returned, not answered."""
+        self.menu("File->Save to Core & Run")
+        return self._watch_connection(seconds)
+
+    def load_from_core(self, seconds: float = 30) -> dict:
+        """File > Load from Core & Connect: the design running on a Core, with its snapshots, opened live."""
+        self.menu("File->Load from Core & Connect")
+        return self._watch_connection(seconds)
+
+    def _watch_connection(self, seconds: float) -> dict:
+        """Wait while Designer only shows its progress ("Core Status": discovering, compiling, sending);
+        stop at any other dialog or once connected. A Core still not found at the end is given up on
+        (this Cancel only stops the request made here)."""
+        deadline = time.time() + seconds
+        mode, dialogs = "", []
+        while time.time() < deadline:
+            time.sleep(1)
+            dialogs = self.dialogs()
+            mode = self._mode(self.window())
+            if mode.startswith("System is") and "mulat" not in mode:
+                break
+            if dialogs and not all(d.get("title") == "Core Status" for d in dialogs):
+                break
+        out = {"mode": mode, "dialogs": dialogs, "title": self.window().window_text()}
+        progress = " ".join(t for d in dialogs if d.get("title") == "Core Status" for t in d.get("text", []))
+        if "Discovering Core" in progress:
+            self.press("Cancel")
+            out["dialogs"] = self.dialogs()
+            out["gave_up"] = (f"No Core answered within {seconds:.0f} s ({progress.strip()}). Designer looks for the "
+                              "Core by the name in the design: it must be the real Core's name, on a network this PC reaches.")
+        return out
+
     def stop(self) -> dict:
         self.menu("File->Disconnect")
         time.sleep(1.5)

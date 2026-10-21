@@ -248,4 +248,6 @@ Other checks and documents:
 
 `designer_check` runs Designer's own Check Design and returns its errors, warnings and the licences the design needs.
 
+On a real Core (after `qrc_connect`): `compare_with_core` says which design it runs and compares every stored value with it; `pull_core_snapshots` reads the snapshots saved on site (recalling each one, then putting the controls back) and, with `out_path`, records them into a copy of the design. Recalling snapshots changes a live room, so it needs `allow_changes`. `send_to_core` and `load_from_core` drive Designer's File > Save to Core & Run and Load from Core & Connect, only with `confirm=True`; Designer finds the Core by the design's Core name.
+
 For control logic, write a `run_scenario`: it emulates a test copy and runs steps such as `{"load": {"controller": "MODES", "snapshot": 3}}` then `{"expect": {"component": "MIC_MUTE", "control": "mute", "value": false}}`, and reports each expectation. `emulate_design` and the `qrc_*` tools are there for exploring by hand. Emulation has no audio: it can test control state, but not whether sound actually gets through.
