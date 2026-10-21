@@ -1,6 +1,6 @@
 [project]
 name = "qsys-designer-mcp"
-version = "0.4.1"
+version = "0.5.0"
 description = "Unofficial MCP server that builds, reads, checks and emulates Q-SYS Designer designs"
 readme = "README.md"
 license = "MIT"
@@ -28,8 +28,8 @@ dependencies = [
 dev = ["pytest>=8", "pytest-asyncio>=0.23"]
 
 [project.urls]
-Homepage = "https://github.com/nerif-tafu/qsys-designer-mcp"
-Issues = "https://github.com/nerif-tafu/qsys-designer-mcp/issues"
+Homepage = "https://github.com/NoaSansH/qsys-designer-mcp"
+Issues = "https://github.com/NoaSansH/qsys-designer-mcp/issues"
 
 [project.scripts]
 qsys-designer-mcp = "qsys_mcp.server:main"

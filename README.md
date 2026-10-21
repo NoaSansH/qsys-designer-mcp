@@ -25,9 +25,11 @@ An MCP server that lets Claude, or any other MCP client, build Q-SYS designs. Yo
 - **Edit a saved design** operation by operation (`edit_design`): move, rewire, set a value or a plugin's IP, add or remove blocks, without rebuilding and without losing snapshot contents.
 - **Read any design back,** including ones it didn't build: components, properties, stored values, pins, wires and UCIs.
 - **Check signal flow statically** over the real wiring, for example "mic 1 reaches the USB send", "the laptop never reaches the far end", "the echo canceller's reference carries the far end", or "no unconnected pins".
-- **Check a design against a control system's needs** (`check_contract`), **document it** as an HTML page with every setting and what each snapshot sets (`document_design`), **compare two versions** (`compare_designs`) and **generate a test UCI** (`make_test_uci`).
+- **Check a design against a control system's needs** (`check_contract`, or `check_simpl` straight from a SIMPL program), **document it** as an HTML page with every setting and what each snapshot sets (`document_design`), **compare two versions** (`compare_designs`) and **generate a test UCI** (`make_test_uci`).
 - **Test Lua outside Designer** (`lua_test`): a Text Controller's script runs against simulated controls, blocks and timers, in milliseconds.
-- **Templates**: reusable spec fragments included with a prefix, parameters and an offset.
+- **Templates**: reusable spec fragments included with a prefix, parameters and an offset, and a library of ready-made ones (`list_templates`): conference room with a USB PC and a Dante mic that cancels echo itself, conference room with the AEC in the Core, speaker zone.
+- **Read a Crestron SIMPL program** (`check_simpl`): the blocks and controls its Q-SYS modules use are taken from the `.smw` and its `.usp` files and checked against the design.
+- **Audit a design** (`audit_design`): a mic reaching the speakers, a PC getting its own audio back, an AEC reference taken before the volume, unconnected blocks, limiter thresholds, blocks open to QRC, in the stored state and in every snapshot.
 - **Check in Designer and test scenarios.** `designer_check` runs Designer's Check Design; `run_scenario` emulates and checks control state step by step (recall a snapshot, expect values).
 - **Emulate and test.** It opens a test copy in Designer's emulator with every block visible to QRC, then reads and sets controls to test modes, mutes and script logic.
 - **Calibrate stored values.** It measures what the engine actually loads for each stored value and fixes the file if needed (more on why below).
@@ -48,7 +50,7 @@ The commands below use `uvx`, which comes with [uv](https://docs.astral.sh/uv/).
 ### Claude Code
 
 ```bash
-claude mcp add qsys -- uvx --from git+https://github.com/nerif-tafu/qsys-designer-mcp qsys-designer-mcp
+claude mcp add qsys -- uvx --from git+https://github.com/NoaSansH/qsys-designer-mcp qsys-designer-mcp
 ```
 
 ### Claude Desktop
@@ -60,7 +62,7 @@ Add this to `claude_desktop_config.json` (Settings > Developer > Edit Config), t
   "mcpServers": {
     "qsys": {
       "command": "uvx",
-      "args": ["--from", "git+https://github.com/nerif-tafu/qsys-designer-mcp", "qsys-designer-mcp"]
+      "args": ["--from", "git+https://github.com/NoaSansH/qsys-designer-mcp", "qsys-designer-mcp"]
     }
   }
 }
@@ -69,7 +71,7 @@ Add this to `claude_desktop_config.json` (Settings > Developer > Edit Config), t
 ### Without uv
 
 ```bash
-pip install git+https://github.com/nerif-tafu/qsys-designer-mcp
+pip install git+https://github.com/NoaSansH/qsys-designer-mcp
 ```
 
 Then point your client at the `qsys-designer-mcp` command that pip installs. Any MCP client that can start a stdio server works the same way: Cursor, VS Code and so on.
@@ -143,8 +145,8 @@ Because it relies on undocumented internals, any Designer update could break it.
 
 | Area | Tools |
 |---|---|
-| Learn | `designer_versions`, `probe_components` |
-| Build, edit and check | `build_design`, `edit_design`, `read_design`, `list_controls`, `check_design`, `check_contract`, `designer_check`, `learn_block_sizes` |
+| Learn | `designer_versions`, `probe_components`, `list_templates` |
+| Build, edit and check | `build_design`, `edit_design`, `read_design`, `list_controls`, `check_design`, `check_contract`, `check_simpl`, `audit_design`, `designer_check`, `learn_block_sizes` |
 | Document | `document_design`, `compare_designs`, `make_test_uci` |
 | Run | `designer_status`, `open_design`, `close_design`, `emulate_design`, `stop_emulation`, `list_dialogs`, `dialog_button`, `screenshot` |
 | Stored values and snapshots | `calibrate_values`, `record_snapshots` |
@@ -157,11 +159,11 @@ There are three resources, `qsys://spec-format`, `qsys://lua-api` and `qsys://de
 
 - Emulation has no audio. It can't prove that signal flows, that an AEC converges, or that a gate or limiter acts. Signal paths are checked from the wiring.
 - USB HID call control (Teams/Zoom mute sync) can't be tested in emulation, because the PC side can't be simulated.
-- Named controls aren't part of the spec yet. A plugin must be installed (or given as a `.qplug` file) to be placed.
+- A plugin must be installed (or given as a `.qplug` file) to be placed.
 - Snapshot contents are recorded in emulation, so the controls they hold must be settable there.
 - Block sizes are Designer's own: a long label is cut, so keep labels short.
 - Designer must be in English. Only menu and dialog names depend on the language.
-- Tested on Designer 9.13.1 and 10.3.0. Other versions should work, but they use the same undocumented internals, so try them on a copy first.
+- Tested on Designer 9.13.2 LTS and 10.5.0. Other versions should work, but they use the same undocumented internals, so try them on a copy first.
 
 ## Development
 
