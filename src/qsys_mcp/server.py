@@ -234,7 +234,7 @@ async def run_scenario(path: str, steps: list[dict], discard_changes: bool = Fal
 async def learn_block_sizes(path: str, discard_changes: bool = False) -> dict:
     """Let Designer draw a design once (on a test copy) and remember the real size of each kind of
     block, so automatic layout (spec "layout") spaces blocks exactly. Closes any running Designer first."""
-    return await runtime.learn_block_sizes(designer, path, discard_changes)
+    return await runtime.learn_block_sizes(designer, qrc, path, discard_changes)
 
 
 @tool(READ_ONLY)

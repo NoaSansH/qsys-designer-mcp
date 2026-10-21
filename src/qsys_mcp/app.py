@@ -293,16 +293,33 @@ class Designer:
                 break
         out = {"dialogs": dialogs, "errors": [], "warnings": [], "licenses": []}
         for d in dialogs:
-            texts = [t.strip() for t in d["text"] if t.strip()]
+            # drop the dialog's icon glyph (a lone non-ASCII character)
+            texts = [t.strip() for t in d["text"] if t.strip() and (t.strip().isascii() or len(t.strip()) > 1)]
+            # an error or warning heading is followed by its explanation, up to the resources report
+            kind = None
             for t in texts:
                 low = t.lower()
-                if "error" in low and "0 error" not in low:
-                    out["errors"].append(t)
-                elif "warning" in low and "0 warning" not in low:
-                    out["warnings"].append(t)
-            if "Q-SYS Software License Type" in texts:
-                i = texts.index("Quantity or Type")
-                out["licenses"] = [t for t in texts[i + 1:] if not t.startswith("Q-SYS Reflect")][:12]
+                if t.startswith("Signal Processing and Network Usage"):
+                    kind = None
+                elif "error" in low and "0 error" not in low and len(t) < 60:
+                    kind = "errors"
+                    out[kind].append(t)
+                elif "warning" in low and "0 warning" not in low and len(t) < 60:
+                    kind = "warnings"
+                    out[kind].append(t)
+                elif kind:
+                    out[kind][-1] += ": " + t if not out[kind][-1].endswith(t) else ""
+            if "Quantity or Type" in texts:   # rows of (licence, required by design, quantity or type)
+                rows = []
+                for t in texts[texts.index("Quantity or Type") + 1:]:
+                    if t.startswith("Q-SYS Reflect") or t.startswith("If monitored") or t == "OK":
+                        break
+                    if t.startswith("*"):   # "* Multiple licenses fulfill requirement."
+                        out.setdefault("license_notes", []).append(t)
+                        continue
+                    rows.append(t)
+                out["licenses"] = [{"license": rows[i], "required": rows[i + 1], "quantity": rows[i + 2]}
+                                   for i in range(0, len(rows) - 2, 3)]
         for d in dialogs:
             for b in ("OK", "Close"):
                 if b in d["buttons"]:

@@ -1024,6 +1024,7 @@ static partial class QsysHelper
         foreach (var c in comps)
         {
             var o = new JObject { { "name", NameOf(c) }, { "class", (string)Q.Get(c, "ClassName") }, { "label", Convert.ToString(Q.Get(c, "Label")) },
+                { "user_label", Convert.ToString(Q.TryGet(c, "UserLabel")) },
                 { "page", pageOf[c] }, { "script_access", Q.Get(c, "ScriptAccess").ToString() } };
             var pos = (System.Windows.Point)Q.Get(c, "Position");
             o["x"] = pos.X; o["y"] = pos.Y;
