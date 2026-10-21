@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import functools
 import os
+from pathlib import Path
 from importlib import resources
 from typing import Any
 
@@ -432,16 +433,29 @@ def designer_check(path: str | None = None, discard_changes: bool = False) -> di
 
 @tool(READ_ONLY)
 def lua_test(steps: list[dict], code: str | None = None, controls: list[dict] | None = None,
-             path: str | None = None, component: str | None = None) -> dict:
-    """Run a Text Controller script outside Designer, in a real Lua interpreter, against simulated
-    Controls, Component.New, Timer (on a simulated clock), NamedControl and print. Give `code` and its
-    `controls` (as in a spec's text_controller), or `path` + `component` to take both from a design.
-    Steps: {"set": {"control" | "component"+"control", "value"}} (fires EventHandlers, like a change
-    from outside), {"advance": seconds}, {"expect": {..., "value" | "string", "tolerance"?}}, each with an
-    optional "label". Needs Lua 5.3/5.4 (QSYS_LUA or lua on PATH)."""
+             path: str | None = None, component: str | None = None, plugin_file: str | None = None,
+             properties: dict | None = None, http: list[dict] | None = None, system: dict | None = None,
+             auto_connect: bool = True) -> dict:
+    """Run a Text Controller script, or a plugin's code, outside Designer in a real Lua interpreter,
+    against simulated Controls, Component.New, Timer (simulated clock), NamedControl, TcpSocket,
+    UdpSocket, HttpClient, require("rapidjson") / require("json"), System, Design, Notifications, Uci,
+    Crypto (Base64) and print. Give `code` and its `controls` (as in a spec's text_controller), or `path` +
+    `component` to take both from a design, or `plugin_file` (.qplug) with optional `properties`: the
+    plugin's design-time functions run first (properties, controls, layout: layout entries without a
+    control are reported), then its runtime code. Steps: {"set": {"control" | "component"+"control",
+    "value"}}, {"advance": seconds}, {"socket": {"to": "host:port", "data": "..." | "event": "Closed"}},
+    {"udp": {"data", "address", "port"}}, {"notify": {"name", "data"}}, {"expect": {..., "value" | "string"}}
+    or {"expect": {"sent": "PWR ON\r", "to": "host:port"}}, {"expect": {"connected": true}},
+    {"expect": {"request": "GET http://..."}}, {"expect": {"uci": "Panel", "page": "Home"}}, each with an
+    optional "label". http: simulated replies [{"url", "method"?, "code"?, "data" (text or object)}].
+    system: System fields, e.g. {"IsEmulating": false}. Needs Lua 5.3/5.4 (QSYS_LUA or lua on PATH)."""
     import json as _json
     from qsys_mcp import luatest
-    if path:
+    plugin = False
+    if plugin_file:
+        code = Path(plugin_file).read_text(encoding="utf-8")
+        plugin, controls = True, []
+    elif path:
         if not component:
             raise ValueError("give component with path")
         c = next((c for c in designs.read(path)["components"] if c["name"] == component), None)
@@ -454,7 +468,8 @@ def lua_test(steps: list[dict], code: str | None = None, controls: list[dict] | 
                          "max": x.get("Max", 1), "type": str(x.get("ControlType", "")).lower()} for x in specs]
     if not code:
         raise ValueError("no Lua code to test")
-    return luatest.run(code, controls or [], steps)
+    return luatest.run(code, controls or [], steps, http=http, system=system, plugin=plugin, properties=properties,
+                       auto_connect=auto_connect)
 
 
 @tool(READ_ONLY)
