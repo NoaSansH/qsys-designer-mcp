@@ -65,6 +65,7 @@ static partial class QsysHelper
             case "set_values": return SetValues(req);
             case "copy": return Copy(req);
             case "copy_snapshots": return CopySnapshots(req);
+            case "core_files": return CoreFiles(req);
             case "edit": return Edit(req);
             case "controls": return Controls(req);
             case "types": return Types(req);
@@ -1071,6 +1072,8 @@ static partial class QsysHelper
             var o = new JObject { { "name", NameOf(c) }, { "class", (string)Q.Get(c, "ClassName") }, { "label", Convert.ToString(Q.Get(c, "Label")) },
                 { "user_label", Convert.ToString(Q.TryGet(c, "UserLabel")) },
                 { "page", pageOf[c] }, { "script_access", Q.Get(c, "ScriptAccess").ToString() } };
+            var uid = Q.TryGet(c, "Id");   // the engine's id of the block, used in snapshot files
+            if (uid != null) o["uid"] = Convert.ToString(Q.TryGet(uid, "RawString") ?? uid);
             var pos = (System.Windows.Point)Q.Get(c, "Position");
             o["x"] = pos.X; o["y"] = pos.Y;
             var csize = Q.TryGet(c, "Size");
@@ -1234,6 +1237,25 @@ static partial class QsysHelper
         }
         Save(doc, outPath);
         return new JObject { { "path", outPath }, { "copied", copied } };
+    }
+
+    // The engine files saved inside a design (snapshot contents...), by name, as base64.
+    static JObject CoreFiles(JObject req)
+    {
+        var doc = Q.Load(Path.GetFullPath((string)req["path"]));
+        var prefix = (string)req["prefix"] ?? "";
+        var res = new JArray();
+        foreach (var f in Q.L(Q.Get(doc, "CoreFiles")))
+        {
+            var name = (string)Q.F(f, "FileName");
+            if (!name.StartsWith(prefix)) continue;
+            var bytes = (byte[])Q.F(f, "Contents") ?? new byte[0];
+            res.Add(new JObject { { "name", name }, { "bytes", bytes.Length }, { "base64", Convert.ToBase64String(bytes) } });
+        }
+        var banks = new JObject();
+        foreach (var b in Q.L(Q.Get(doc, "Snapshots")).Where(b => b.GetType().Name == "Bank"))
+            banks[Convert.ToString(Q.Get(b, "Name"))] = Convert.ToString(Q.Get(b, "FileName"));
+        return new JObject { { "files", res }, { "banks", banks } };
     }
 
     // ---- edit saved files -----------------------------------------------------------------

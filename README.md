@@ -23,7 +23,7 @@ An MCP server that lets Claude, or any other MCP client, build Q-SYS designs. Yo
   - automatic layout along the signal flow, with zones and notes
 - **Look things up.** `probe_components` tells you a component class's properties, pins and controls, and what I/O a Core offers. Claude doesn't have to guess names.
 - **Edit a saved design** operation by operation (`edit_design`): move, rewire, set a value or a plugin's IP, add or remove blocks, without rebuilding and without losing snapshot contents.
-- **Read any design back,** including ones it didn't build: components, properties, stored values, pins, wires and UCIs.
+- **Read any design back,** including ones it didn't build: components, properties, stored values, pins, wires and UCIs, and what each snapshot sets (`read_snapshots`), straight from the file without emulation.
 - **Check signal flow statically** over the real wiring, for example "mic 1 reaches the USB send", "the laptop never reaches the far end", "the echo canceller's reference carries the far end", or "no unconnected pins".
 - **Check a design against a control system's needs** (`check_contract`, or `check_simpl` straight from a SIMPL program), **document it** as an HTML page with every setting and what each snapshot sets (`document_design`), **compare two versions** (`compare_designs`) and **generate a test UCI** (`make_test_uci`).
 - **Test Lua outside Designer** (`lua_test`): a Text Controller's script runs against simulated controls, blocks and timers, in milliseconds.
@@ -146,7 +146,7 @@ Because it relies on undocumented internals, any Designer update could break it.
 | Area | Tools |
 |---|---|
 | Learn | `designer_versions`, `probe_components`, `list_templates` |
-| Build, edit and check | `build_design`, `edit_design`, `read_design`, `list_controls`, `check_design`, `check_contract`, `check_simpl`, `audit_design`, `designer_check`, `learn_block_sizes` |
+| Build, edit and check | `build_design`, `edit_design`, `read_design`, `read_snapshots`, `list_controls`, `check_design`, `check_contract`, `check_simpl`, `audit_design`, `designer_check`, `learn_block_sizes` |
 | Document | `document_design`, `compare_designs`, `make_test_uci` |
 | Run | `designer_status`, `open_design`, `close_design`, `emulate_design`, `stop_emulation`, `list_dialogs`, `dialog_button`, `screenshot` |
 | Stored values and snapshots | `calibrate_values`, `record_snapshots` |
@@ -160,7 +160,7 @@ There are three resources, `qsys://spec-format`, `qsys://lua-api` and `qsys://de
 - Emulation has no audio. It can't prove that signal flows, that an AEC converges, or that a gate or limiter acts. Signal paths are checked from the wiring.
 - USB HID call control (Teams/Zoom mute sync) can't be tested in emulation, because the PC side can't be simulated.
 - A plugin must be installed (or given as a `.qplug` file) to be placed.
-- Snapshot contents are recorded in emulation, so the controls they hold must be settable there.
+- Snapshot contents are written in emulation (the engine signs its snapshot files), so the controls they hold must be settable there. Reading them needs no emulation.
 - Block sizes are Designer's own: a long label is cut, so keep labels short.
 - Designer must be in English. Only menu and dialog names depend on the language.
 - Tested on Designer 9.13.2 LTS and 10.5.0. Other versions should work, but they use the same undocumented internals, so try them on a copy first.

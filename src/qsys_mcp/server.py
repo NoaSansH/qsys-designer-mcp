@@ -186,18 +186,19 @@ def check_simpl(design_path: str, smw_path: str, usp_dirs: list[str] | None = No
     return r
 
 
-@tool(APP_SAFE)
-async def audit_design(path: str, roles: dict | None = None, with_snapshots: bool = False, discard_changes: bool = False) -> dict:
+@tool(READ_ONLY)
+def audit_design(path: str, roles: dict | None = None, with_snapshots: bool = True) -> dict:
     """Review a design for the mistakes that make a room unusable: a microphone reaching the loudspeakers
     (feedback), a PC getting its own audio back (echo, loop), an AEC reference not taken after the room
     volume, blocks with no connection, limiter thresholds above 0 dBFS, high stored gains, blocks open to
     QRC. Paths follow the wiring through each block in its state: muted or -100 dB crosspoints and muted
-    gains stop them. with_snapshots also checks every saved snapshot (emulates a test copy). roles, when
+    gains stop them. with_snapshots also checks every saved snapshot (read from the file). roles, when
     the inferred ones aren't right: {"mics": [...], "speakers": [...], "pc_links": [[in, out]],
     "aec_reference": "BLOCK.in.N", "volume": "BLOCK"} (blocks or pins)."""
-    from qsys_mcp import audit
-    values = await runtime.snapshot_contents(designer, emulator, path, discard_changes) if with_snapshots else None
-    return audit.audit(designs.read(path), roles, values)
+    from qsys_mcp import audit, snapshotdata
+    design = designs.read(path)
+    values = snapshotdata.contents(path, design) if with_snapshots else None
+    return audit.audit(design, roles, values)
 
 
 @tool(READ_ONLY)
@@ -209,29 +210,43 @@ def list_controls(path: str, components: list[str] | None = None) -> dict:
 
 
 @tool(WRITES_FILE)
-async def document_design(path: str, out_html: str, title: str | None = None, lang: str = "fr",
+def document_design(path: str, out_html: str, title: str | None = None, lang: str = "fr",
                           with_snapshot_values: bool = False, overwrite: bool = False) -> dict:
     """Write a self-contained HTML document of a saved design: inventory, blocks with properties and
     stored values, wires and signal names, snapshot banks, UCIs and notes. lang is fr or en.
-    with_snapshot_values also lists what every saved snapshot sets (emulates a test copy, which closes
-    any running Designer first)."""
-    from qsys_mcp import report
+    with_snapshot_values also lists what every saved snapshot sets (read from the file)."""
+    from qsys_mcp import report, snapshotdata
     if os.path.exists(out_html) and not overwrite:
         raise FileExistsError(f"{out_html} exists; pass overwrite=True to replace it")
-    values = await runtime.snapshot_contents(designer, emulator, path, True) if with_snapshot_values else None
-    page = report.document(designs.read(path), title, lang, values)
+    design = designs.read(path)
+    values = snapshotdata.contents(path, design) if with_snapshot_values else None
+    page = report.document(design, title, lang, values)
     with open(out_html, "w", encoding="utf-8") as fh:
         fh.write(page)
     return {"path": os.path.abspath(out_html), "bytes": len(page.encode("utf-8")), "snapshot_values": bool(values)}
 
 
 @tool(READ_ONLY)
-def compare_designs(path_a: str, path_b: str, positions: bool = False) -> dict:
+def compare_designs(path_a: str, path_b: str, positions: bool = False, snapshot_values: bool = True) -> dict:
     """What changed from design A to design B: blocks added, removed or changed (class, label, Script
     Access, properties, stored values, signal names, and positions if asked), connections, snapshot
-    banks and UCIs. Snapshot contents are compared by which snapshots hold data, not by value."""
-    from qsys_mcp import report
-    return report.diff(designs.read(path_a), designs.read(path_b), positions)
+    banks, what each snapshot sets (snapshot_values, read from the files) and UCIs. Identifiers Designer
+    makes up for each block are left out."""
+    from qsys_mcp import report, snapshotdata
+    a, b = designs.read(path_a), designs.read(path_b)
+    sa = snapshotdata.contents(path_a, a) if snapshot_values else None
+    sb = snapshotdata.contents(path_b, b) if snapshot_values else None
+    return report.diff(a, b, positions, sa, sb)
+
+
+@tool(READ_ONLY)
+def read_snapshots(path: str, banks: list[str] | None = None) -> dict:
+    """What every saved snapshot of a design sets, read straight from the file (no Designer window, no
+    emulation): {bank: {"1": {"BLOCK.control": value}}}, numbers as numbers (gains in dB, mutes 0/1,
+    selections), text as text. Works on any design, including snapshots saved on site and pulled back."""
+    from qsys_mcp import snapshotdata
+    out = snapshotdata.contents(path)
+    return {b: v for b, v in out.items() if not banks or b in banks}
 
 
 @tool(WRITES_FILE)

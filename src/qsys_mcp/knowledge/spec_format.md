@@ -120,7 +120,7 @@ Notes and group boxes on the schematic:
 
 - Creates the bank (Snapshots panel) with the listed controls, or with every control of a component (`all`).
 - `controller` places its Snapshot Controller on the schematic under that code name, usable by Lua, QRC and UCIs (`load_1`, `save_1`...). `mode` is `Normal`, `WriteProtect` or `Scene`.
-- The bank starts empty. Snapshot contents are written by the engine, not stored as control values: fill them with `record_snapshots`, which saves each snapshot in emulation and copies the result into the design. `read_design` shows which snapshots of each bank hold data.
+- The bank starts empty. Snapshot contents are written by the engine, not stored as control values: fill them with `record_snapshots`, which saves each snapshot in emulation and copies the result into the design. `read_design` shows which snapshots of each bank hold data, and `read_snapshots` what each one sets, read straight from the file (no emulation).
 
 ## ucis
 
@@ -237,7 +237,8 @@ Other checks and documents:
 - `check_contract` checks what a control system or a script expects of the design: blocks by code name, Script Access (`qrc`, `script` or `both`) and the controls read or written. `list_controls` lists every control of the blocks.
 - `check_simpl` builds that contract from a Crestron SIMPL program (`.smw`) and its Q-SYS modules' `.usp` files (QscQsys library: Fader, Meter, Camera, Snapshot Controller, Generic Component Control), then checks it: each module instance's component name, and the controls it uses (for a camera, only the joins wired in the program). Other modules can be described with `modules`.
 - `audit_design` looks for what makes a room unusable: a mic reaching the speakers (feedback), a PC getting its own audio back, an AEC reference taken before the room volume, blocks with no connection, limiter thresholds above 0 dBFS, high stored gains, blocks open to QRC. Paths follow the wires and signal names through each block in its state (muted or -100 dB crosspoints, muted gains), in the stored values and, with `with_snapshots`, in every snapshot. `roles` names the mics, speakers, PC links, AEC reference and volume when the inferred ones aren't right.
-- `document_design` writes an HTML document of the design (inventory, blocks and settings, wires and signal names, snapshot banks and, with `with_snapshot_values`, what each snapshot sets, UCIs, notes). `compare_designs` lists what changed between two versions.
+- `document_design` writes an HTML document of the design (inventory, blocks and settings, wires and signal names, snapshot banks and, with `with_snapshot_values`, what each snapshot sets, UCIs, notes). `compare_designs` lists what changed between two versions, including what each snapshot sets.
+- `read_snapshots` gives what every saved snapshot sets, read from the file without Designer: `{bank: {"1": {"BLOCK.control": value}}}`.
 - `make_test_uci` adds a test UCI generated from the design: snapshot buttons, meters, gains and mutes, Text Controller states.
 - `lua_test` runs a Text Controller's script outside Designer against simulated Controls, other blocks and timers.
 
