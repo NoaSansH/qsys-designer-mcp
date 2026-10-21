@@ -4,6 +4,11 @@
 //
 //   qhelper.exe <designer-dir> <request.json> <response.json>
 //
+// or keeps one process per Designer version and sends it commands (Designer loads once):
+//
+//   qhelper.exe <designer-dir> --serve      stdin: "<request.json>\t<response.json>" per line,
+//                                          stdout: DONE_MARK after each response is written
+//
 // Commands (request "command"): info, probe, build, read, edit, set_values, copy, copy_snapshots.
 // Uses Designer internals that are not a public API; see the README's licensing note.
 using System;
@@ -16,24 +21,57 @@ using Newtonsoft.Json.Linq;
 
 static partial class QsysHelper
 {
+    const string DONE_MARK = "##qhelper-done";
+
     // Main must not touch Newtonsoft types: they load from the Designer folder, and the resolver
     // for that folder is only installed by Q.Init. The JSON work happens in Run().
     [STAThread]
     static int Main(string[] args)
     {
-        if (args.Length < 3) { Console.Error.WriteLine("usage: qhelper <designer-dir> <request.json> <response.json>"); return 2; }
-        var requestPath = Path.GetFullPath(args[1]);
-        var responsePath = Path.GetFullPath(args[2]);
+        bool serve = args.Length == 2 && args[1] == "--serve";
+        if (args.Length < 3 && !serve) { Console.Error.WriteLine("usage: qhelper <designer-dir> <request.json> <response.json> | --serve"); return 2; }
+        string initError = null;
         try { Q.Init(Path.GetFullPath(args[0])); }
         catch (Exception ex)
         {
             while (ex.InnerException != null) ex = ex.InnerException;
-            File.WriteAllText(responsePath, "{\"ok\": false, \"error\": \"could not load Designer from " +
-                args[0].Replace("\\", "\\\\") + ": " + ex.Message.Replace("\\", "/").Replace("\"", "'") + "\"}");
+            initError = "{\"ok\": false, \"error\": \"could not load Designer from " +
+                args[0].Replace("\\", "\\\\") + ": " + ex.Message.Replace("\\", "/").Replace("\"", "'") + "\"}";
+        }
+        if (!serve)
+        {
+            var responsePath = Path.GetFullPath(args[2]);
+            if (initError != null) File.WriteAllText(responsePath, initError);
+            else Run(Path.GetFullPath(args[1]), responsePath);
             return 0;
         }
-        Run(requestPath, responsePath);
+        var stdout = Console.Out;
+        string line;
+        while ((line = Console.In.ReadLine()) != null)
+        {
+            var parts = line.Split('\t');
+            if (parts.Length != 2) continue;
+            if (initError != null) File.WriteAllText(parts[1], initError);
+            else { Run(parts[0], parts[1]); EndSession(); }
+            stdout.WriteLine(DONE_MARK);
+            stdout.Flush();
+        }
         return 0;
+    }
+
+    // Between two commands of a serving helper: forget the block ids the last design registered, so a
+    // design loaded again keeps its own ids (Designer gives a block a new id when its id is in use,
+    // which would detach it from its snapshot data).
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    static void EndSession()
+    {
+        try
+        {
+            var active = Q.T("QSC.QSys.Design.UniqueId").GetField("_ActiveGuids", Q.All).GetValue(null);
+            if (active != null) active.GetType().GetMethod("Clear").Invoke(active, null);
+        }
+        catch (Exception) { }
+        GC.Collect();
     }
 
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
