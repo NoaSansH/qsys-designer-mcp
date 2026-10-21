@@ -67,6 +67,8 @@ static partial class QsysHelper
             case "copy_snapshots": return CopySnapshots(req);
             case "edit": return Edit(req);
             case "controls": return Controls(req);
+            case "types": return Types(req);
+            case "members": return Members(req);
             default: throw new Exception("unknown command " + req["command"]);
         }
     }
@@ -405,7 +407,7 @@ static partial class QsysHelper
     // A schematic plugin, from an installed .qplug (by its name or id) or from a given file.
     static string PluginClass(JToken plugin, string pluginFile)
     {
-        var mgrT = Q.T("QSC.QSys.Design.Plugins.Manager");
+        var mgrT = Q.PluginManager;
         var files = new List<string>();
         if (pluginFile != null) files.Add(Path.GetFullPath(pluginFile));
         else
@@ -440,12 +442,22 @@ static partial class QsysHelper
             if (pluginFile == null && !(string.Equals(want, name, StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(want, shortName, StringComparison.OrdinalIgnoreCase) || string.Equals(want, id, StringComparison.OrdinalIgnoreCase)))
                 continue;
-            Q.Call(mgrT, "ReadPluginToCatalog", f, false);
             var all = (IDictionary)mgrT.GetProperty("AllPlugins", Q.All).GetValue(null, null);
-            foreach (DictionaryEntry kv in all)
-                if (string.Equals(Convert.ToString(Q.Get(kv.Value, "FilePath")), f, StringComparison.OrdinalIgnoreCase))
-                    return (string)Q.Get(kv.Value, "ClassId");
-            throw new Exception("Designer could not read the plugin " + f);
+            var before = new HashSet<object>(all.Keys.Cast<object>());
+            var managed = f.IndexOf(Path.DirectorySeparatorChar + "Assets" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) >= 0;
+            var errors = new List<string>();
+            // Designer 9.x reads the file; 10.5 may want the managed flag, or the text itself
+            foreach (var attempt in new Action[] {
+                () => Q.Call(mgrT, "ReadPluginToCatalog", f, managed),
+                () => Q.Call(mgrT, "ReadPluginToCatalog", f, !managed),
+                () => Q.Call(mgrT, "ReadPluginStringToCatalog", managed, File.ReadAllText(f), f) })
+            {
+                try { attempt(); } catch (Exception e) { errors.Add((e.InnerException ?? e).Message); }
+                foreach (DictionaryEntry kv in all)
+                    if (!before.Contains(kv.Key) || string.Equals(Convert.ToString(Q.Get(kv.Value, "FilePath")), f, StringComparison.OrdinalIgnoreCase))
+                        return (string)Q.Get(kv.Value, "ClassId");
+            }
+            throw new Exception("Designer could not read the plugin " + f + (errors.Count > 0 ? ": " + string.Join("; ", errors) : ""));
         }
         throw new Exception("plugin '" + want + "' is not installed (install it with Designer's Asset Manager, or give plugin_file); installed: " +
             (seen.Count == 0 ? "none" : string.Join(", ", seen)));
@@ -591,7 +603,7 @@ static partial class QsysHelper
         Q.Set(c, "CodeName", name);
         Q.Set(c, "UserLabel", (string)cs["label"] ?? name);
         SetAccess(c, (string)cs["script_access"] ?? "None");
-        if (((string)Q.Get(c, "ClassName")).StartsWith("%PLUGIN%")) Q.Call(Q.T("QSC.QSys.Design.Plugins.Manager"), "AddPluginComponent", c);
+        if (((string)Q.Get(c, "ClassName")).StartsWith("%PLUGIN%")) Q.Call(Q.PluginManager, "AddPluginComponent", c);
         AddControlPins(c, cs["control_pins"] as JArray);
         if ((string)Q.Get(c, "CodeName") != name) ctx.Warnings.Add(name + ": Designer renamed it to " + Q.Get(c, "CodeName"));
         ctx.Comps[name] = c;

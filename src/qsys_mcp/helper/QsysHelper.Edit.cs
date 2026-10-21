@@ -63,6 +63,27 @@ static partial class QsysHelper
         return new JObject { { "components", res } };
     }
 
+    // types: {pattern} / members: {type} - for maintaining the helper when Designer moves its classes
+    static JObject Types(JObject req)
+    {
+        Type[] types;
+        try { types = Q.Asm.GetTypes(); } catch (System.Reflection.ReflectionTypeLoadException e) { types = e.Types.Where(x => x != null).ToArray(); }
+        var re = new System.Text.RegularExpressions.Regex((string)req["pattern"], System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        return new JObject { { "types", new JArray(types.Where(t => t.FullName != null && re.IsMatch(t.FullName)).Select(t => t.FullName).OrderBy(n => n).Take(400)) } };
+    }
+
+    static JObject Members(JObject req)
+    {
+        var t = Q.T((string)req["type"]);
+        var res = new JArray();
+        foreach (var m in t.GetMembers(Q.All | System.Reflection.BindingFlags.DeclaredOnly))
+        {
+            var mb = m as System.Reflection.MethodBase;
+            res.Add(m.MemberType + " " + m.Name + (mb != null ? "(" + string.Join(", ", mb.GetParameters().Select(p => p.ParameterType.FullName + " " + p.Name)) + ")" + (mb.IsStatic ? " static" : "") : ""));
+        }
+        return new JObject { { "type", t.FullName }, { "base", t.BaseType == null ? null : t.BaseType.FullName }, { "members", res } };
+    }
+
     static object EnsureManager()
     {
         var mgrField = Q.T("QSC.QSys.App").GetField("Manager", Q.All);

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.1 (2026-10-21)
+
+- Designer 10.5 (on .NET 10): the helper loads Designer's own System.Runtime.Serialization.Formatters (BinaryFormatter left the framework), sets up Designer's DesignRuntime before loading files, and finds the plugin catalog where 10.5 moved it. Builds, reading, editing, calibration, snapshots, scenarios and Check Design tested on 10.5.0.
+- Cached .NET helpers are redone when the helper changes (the whole helper is hashed, not its header).
+- Helper commands `types` and `members`, to follow Designer's classes when a version moves them.
+
 ## 0.4.0 (2026-10-21)
 
 - `check_contract` and `list_controls`: what a control system or script expects of a design (blocks, Script Access, controls read or written), with near-miss suggestions.

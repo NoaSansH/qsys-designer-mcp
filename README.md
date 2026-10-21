@@ -32,7 +32,7 @@ An MCP server that lets Claude, or any other MCP client, build Q-SYS designs. Yo
 - **Emulate and test.** It opens a test copy in Designer's emulator with every block visible to QRC, then reads and sets controls to test modes, mutes and script logic.
 - **Calibrate stored values.** It measures what the engine actually loads for each stored value and fixes the file if needed (more on why below).
 
-It works with Designer **9.x** and **10.x**. The additions since 0.1 are tested with 9.13.2 LTS; the .NET 8 helper for 10.x is rebuilt with them. Files are read with the version that saved them. New builds use the newest install unless you pick one.
+It works with Designer **9.x** and **10.x**, and is tested with **9.13.2 LTS** and **10.5.0** (which runs on .NET 10). Several versions can be installed side by side: a file is read and edited with the version that saved it, and new designs use the newest install unless `designer_version` (or `QSYS_DESIGNER_DIR`) says otherwise. Files are read with the version that saved them. New builds use the newest install unless you pick one.
 
 ## Requirements
 
