@@ -25,17 +25,23 @@ An MCP server that lets Claude, or any other MCP client, build Q-SYS designs. Yo
 - **Edit a saved design** operation by operation (`edit_design`): move, rewire, set a value or a plugin's IP, add or remove blocks, without rebuilding and without losing snapshot contents.
 - **Read any design back,** including ones it didn't build: components, properties, stored values, pins, wires and UCIs.
 - **Check signal flow statically** over the real wiring, for example "mic 1 reaches the USB send", "the laptop never reaches the far end", "the echo canceller's reference carries the far end", or "no unconnected pins".
+- **Check a design against a control system's needs** (`check_contract`, or `check_simpl` straight from a SIMPL program), **document it** as an HTML page with every setting and what each snapshot sets (`document_design`), **compare two versions** (`compare_designs`) and **generate a test UCI** (`make_test_uci`).
+- **Test Lua outside Designer** (`lua_test`): a Text Controller's script runs against simulated controls, blocks and timers, in milliseconds.
+- **Templates**: reusable spec fragments included with a prefix, parameters and an offset, and a library of ready-made ones (`list_templates`): conference room with a USB PC and a Dante mic that cancels echo itself, conference room with the AEC in the Core, speaker zone.
+- **Read a Crestron SIMPL program** (`check_simpl`): the blocks and controls its Q-SYS modules use are taken from the `.smw` and its `.usp` files and checked against the design.
+- **Audit a design** (`audit_design`): a mic reaching the speakers, a PC getting its own audio back, an AEC reference taken before the volume, unconnected blocks, limiter thresholds, blocks open to QRC, in the stored state and in every snapshot.
 - **Check in Designer and test scenarios.** `designer_check` runs Designer's Check Design; `run_scenario` emulates and checks control state step by step (recall a snapshot, expect values).
 - **Emulate and test.** It opens a test copy in Designer's emulator with every block visible to QRC, then reads and sets controls to test modes, mutes and script logic.
 - **Calibrate stored values.** It measures what the engine actually loads for each stored value and fixes the file if needed (more on why below).
 
-It works with Designer **9.x** and **10.x**, and has been tested with 9.13.1 and 10.3.0. Files are read with the version that saved them. New builds use the newest install unless you pick one.
+It works with Designer **9.x** and **10.x**, and is tested with **9.13.2 LTS** and **10.5.0** (which runs on .NET 10). Several versions can be installed side by side: a file is read and edited with the version that saved it, and new designs use the newest install unless `designer_version` (or `QSYS_DESIGNER_DIR`) says otherwise. Files are read with the version that saved them. New builds use the newest install unless you pick one.
 
 ## Requirements
 
 - Windows 10 or 11
 - Q-SYS Designer 9.x or later, installed normally. 10.x brings its own .NET 8 runtime with it.
 - Python 3.11 or later, or [uv](https://docs.astral.sh/uv/)
+- For `lua_test`: a Lua 5.3 or 5.4 interpreter (`winget install DEVCOM.Lua`, or set `QSYS_LUA`)
 
 ## Install
 
@@ -44,7 +50,7 @@ The commands below use `uvx`, which comes with [uv](https://docs.astral.sh/uv/).
 ### Claude Code
 
 ```bash
-claude mcp add qsys -- uvx --from git+https://github.com/nerif-tafu/qsys-designer-mcp qsys-designer-mcp
+claude mcp add qsys -- uvx --from git+https://github.com/NoaSansH/qsys-designer-mcp qsys-designer-mcp
 ```
 
 ### Claude Desktop
@@ -56,7 +62,7 @@ Add this to `claude_desktop_config.json` (Settings > Developer > Edit Config), t
   "mcpServers": {
     "qsys": {
       "command": "uvx",
-      "args": ["--from", "git+https://github.com/nerif-tafu/qsys-designer-mcp", "qsys-designer-mcp"]
+      "args": ["--from", "git+https://github.com/NoaSansH/qsys-designer-mcp", "qsys-designer-mcp"]
     }
   }
 }
@@ -65,7 +71,7 @@ Add this to `claude_desktop_config.json` (Settings > Developer > Edit Config), t
 ### Without uv
 
 ```bash
-pip install git+https://github.com/nerif-tafu/qsys-designer-mcp
+pip install git+https://github.com/NoaSansH/qsys-designer-mcp
 ```
 
 Then point your client at the `qsys-designer-mcp` command that pip installs. Any MCP client that can start a stdio server works the same way: Cursor, VS Code and so on.
@@ -122,6 +128,7 @@ Some controls are linked. For example, the Flex inputs' preamp gain and sensitiv
 
 - **It won't overwrite your files.** `build_design` won't replace an existing file unless it's explicitly told to. Calibration only changes stored positions, in the file you point it at. Testing uses a copy in the cache folder.
 - **It won't throw away your work.** It never discards unsaved changes in Designer unless told to (`discard_changes=True`). Claude should only do that when you've said the changes don't matter. Stopping emulation counts as a change, because Designer records the control values from the run.
+- **A real Core is read-only by default.** Emulation tools always talk to Designer's emulator on this PC. `qrc_connect` points the `qrc_*` tools at a real Core, and changing it (`qrc_set_control`, `save_snapshot_live`...) is refused unless `allow_changes=True` was given, which only the user should decide.
 - **QRC can change a live system.** `qrc_set_control` and `qrc_set_named_control` change live values. Against the emulator that's harmless. If you point `QSYS_QRC_HOST` at a real Core, they change a working system.
 - **Screenshots leave your machine.** The `screenshot` tool sends a picture of the Designer window to the AI model you're using. Design files themselves are read locally, and only what a tool returns is sent.
 - **Every tool is labelled.** Each one is marked read-only, writes files, or changes live state, so your client can ask before the risky ones.
@@ -138,12 +145,13 @@ Because it relies on undocumented internals, any Designer update could break it.
 
 | Area | Tools |
 |---|---|
-| Learn | `designer_versions`, `probe_components` |
-| Build, edit and check | `build_design`, `edit_design`, `read_design`, `check_design`, `designer_check`, `learn_block_sizes` |
+| Learn | `designer_versions`, `probe_components`, `list_templates` |
+| Build, edit and check | `build_design`, `edit_design`, `read_design`, `list_controls`, `check_design`, `check_contract`, `check_simpl`, `audit_design`, `designer_check`, `learn_block_sizes` |
+| Document | `document_design`, `compare_designs`, `make_test_uci` |
 | Run | `designer_status`, `open_design`, `close_design`, `emulate_design`, `stop_emulation`, `list_dialogs`, `dialog_button`, `screenshot` |
 | Stored values and snapshots | `calibrate_values`, `record_snapshots` |
-| Runtime (QRC) | `run_scenario`, `qrc_status`, `qrc_list_components`, `qrc_get_controls`, `qrc_set_control`, `qrc_named_controls`, `qrc_set_named_control`, `qrc_watch` |
-| Lua | `lua_check`, `new_plugin` |
+| Runtime (QRC) | `run_scenario`, `qrc_connect`, `save_snapshot_live`, `qrc_status`, `qrc_list_components`, `qrc_get_controls`, `qrc_set_control`, `qrc_named_controls`, `qrc_set_named_control`, `qrc_watch` |
+| Lua | `lua_check`, `lua_test`, `new_plugin` |
 
 There are three resources, `qsys://spec-format`, `qsys://lua-api` and `qsys://design-guide`, plus a `review_design` prompt.
 
@@ -151,11 +159,11 @@ There are three resources, `qsys://spec-format`, `qsys://lua-api` and `qsys://de
 
 - Emulation has no audio. It can't prove that signal flows, that an AEC converges, or that a gate or limiter acts. Signal paths are checked from the wiring.
 - USB HID call control (Teams/Zoom mute sync) can't be tested in emulation, because the PC side can't be simulated.
-- Named controls aren't part of the spec yet. A plugin must be installed (or given as a `.qplug` file) to be placed.
+- A plugin must be installed (or given as a `.qplug` file) to be placed.
 - Snapshot contents are recorded in emulation, so the controls they hold must be settable there.
 - Block sizes are Designer's own: a long label is cut, so keep labels short.
 - Designer must be in English. Only menu and dialog names depend on the language.
-- Tested on Designer 9.13.1 and 10.3.0. Other versions should work, but they use the same undocumented internals, so try them on a copy first.
+- Tested on Designer 9.13.2 LTS and 10.5.0. Other versions should work, but they use the same undocumented internals, so try them on a copy first.
 
 ## Development
 

@@ -270,16 +270,51 @@ async def run_scenario(designer: Designer, qrc: QrcClient, path: str, steps: lis
             "failures": [r for r in checks if not r["pass"]], "steps": results}
 
 
-async def learn_block_sizes(designer: Designer, path: str, discard_changes: bool = False) -> dict:
+async def learn_block_sizes(designer: Designer, qrc: QrcClient, path: str, discard_changes: bool = False) -> dict:
     """Open a test copy of the design in Designer, save it (Designer then records each block's real
     size) and remember those sizes for automatic layout."""
     from qsys_mcp import layout
     path = os.path.abspath(path)
     inst = headless.pick(for_file=path)
-    copy_path = make_test_copy(path)
-    await asyncio.to_thread(designer.open_design, copy_path, discard_changes)
+    # Save does nothing on an unchanged design; a short emulation run marks it changed
+    run = await emulate(designer, qrc, path, test_copy=True, discard_changes=discard_changes)
+    if not run.get("emulating"):
+        return {"path": path, "stopped_at": "emulate", **run}
+    copy_path = run["opened"]
+    await asyncio.to_thread(designer.stop)
     await asyncio.to_thread(designer.menu, "File->Save")
     await asyncio.sleep(2)
-    await asyncio.to_thread(designer.close_designs, True)
+    await asyncio.to_thread(designer.close_designs, True)   # our own test copy, saved just above
     n = layout.learn_sizes(inst, designs.read(copy_path))
     return {"path": path, "blocks_learned": n}
+
+
+async def snapshot_contents(designer: Designer, qrc: QrcClient, path: str, discard_changes: bool = False) -> dict:
+    """What each saved snapshot sets: emulates a test copy, recalls every saved snapshot of every bank
+    with a controller and reads the bank's controls. {bank: {"1": {"BLOCK.control": "string"}}}"""
+    design = designs.read(path)
+    banks = [b for b in design.get("snapshot_banks", []) if b.get("controller") and b["saved_snapshots"]]
+    if not banks:
+        return {}
+    run = await emulate(designer, qrc, path, test_copy=True, discard_changes=discard_changes)
+    if not run.get("emulating"):
+        raise AppError(f"could not emulate {path}: {run.get('dialogs')}")
+    out = {}
+    try:
+        await asyncio.sleep(2)
+        for b in banks:
+            members = [(m["component"], c) for m in b["controls"] if not m["all"] for c in m["controls"]]
+            out[b["name"]] = {}
+            for n in b["saved_snapshots"]:
+                await qrc.set(b["controller"], f"load_{n}", 1)
+                await asyncio.sleep(1.0)
+                values = {}
+                for comp in sorted({c for c, _ in members}):
+                    ctls = [x for c, x in members if c == comp]
+                    for r in (await qrc.get(comp, ctls))["Controls"]:
+                        values[f"{comp}.{r['Name']}"] = r.get("String", r.get("Value"))
+                out[b["name"]][str(n)] = values
+    finally:
+        await asyncio.to_thread(designer.stop)
+        await asyncio.to_thread(designer.close_designs, True)
+    return out

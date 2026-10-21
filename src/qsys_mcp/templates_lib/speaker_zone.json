@@ -1,0 +1,137 @@
+{
+ "description": "A speaker zone: a stereo source selector (3 sources, wire or name its inputs from your sources), zone volume, EQ and a -3 dBFS limiter to two output channels. Use it once per zone with a prefix.",
+ "params": {
+  "OUTPUTS": "Flex Out",
+  "SPK_L": 1,
+  "SPK_R": 2
+ },
+ "param_help": {
+  "OUTPUTS": "Core placeable for the speakers",
+  "SPK_L": "output channel, left",
+  "SPK_R": "output channel, right"
+ },
+ "zones": {
+  "SOURCE": {
+   "fill": "#401E88E5"
+  },
+  "OUTPUT": {
+   "fill": "#40FB8C00"
+  }
+ },
+ "components": [
+  {
+   "name": "SELECT",
+   "class": "router_with_output",
+   "zone": "SOURCE",
+   "label": "Source",
+   "script_access": "External",
+   "properties": {
+    "n_inputs": 3,
+    "n_outputs": 1,
+    "multi_channel_type": 2
+   },
+   "note": "Inputs 1-3 L/R: wire your\nsources to SELECT.in.1..6."
+  },
+  {
+   "name": "VOL",
+   "class": "gain",
+   "zone": "OUTPUT",
+   "label": "Room volume",
+   "script_access": "External",
+   "properties": {
+    "multi_channel_type": 2,
+    "max_gain": 0,
+    "min_gain": -100
+   },
+   "note": "Stereo gain, panel volume.\nBefore the AEC reference."
+  },
+  {
+   "name": "EQ",
+   "class": "equalizer_parametric",
+   "zone": "OUTPUT",
+   "label": "Speaker EQ",
+   "properties": {
+    "multi_channel_type": 2,
+    "n_bands": 6,
+    "bandwidth_q_factor": 1
+   },
+   "values": {
+    "bypass_1": true,
+    "bypass_2": true,
+    "bypass_3": true,
+    "bypass_4": true,
+    "bypass_5": true,
+    "bypass_6": true
+   },
+   "note": "Flat, bands bypassed.\nTuned on site."
+  },
+  {
+   "name": "LIM",
+   "class": "limiter_peak",
+   "zone": "OUTPUT",
+   "label": "Speaker limiter",
+   "properties": {
+    "multi_channel_type": 2,
+    "b_has_sidechain": false
+   },
+   "values": {
+    "threshold_level": -3
+   },
+   "note": "Peak limiter at -3 dBFS,\nlast block before the amp."
+  },
+  {
+   "name": "SPK",
+   "shared": true,
+   "inventory": "${OUTPUTS}",
+   "zone": "OUTPUT",
+   "label": "Speakers",
+   "values": {
+    "channel_${SPK_L}_flex_output_enable": true,
+    "channel_${SPK_R}_flex_output_enable": true
+   },
+   "note": "Flex outputs to the speakers.\nSet Max Level to the amp's input."
+  }
+ ],
+ "wires": [
+  [
+   "SELECT.out.1",
+   "VOL.in.1",
+   "Zone L"
+  ],
+  [
+   "SELECT.out.2",
+   "VOL.in.2",
+   "Zone R"
+  ],
+  [
+   "VOL.out.1",
+   "EQ.in.1",
+   "Spk L vol"
+  ],
+  [
+   "VOL.out.2",
+   "EQ.in.2",
+   "Spk R vol"
+  ],
+  [
+   "EQ.out.1",
+   "LIM.in.1",
+   "Spk L EQ"
+  ],
+  [
+   "EQ.out.2",
+   "LIM.in.2",
+   "Spk R EQ"
+  ],
+  [
+   "LIM.out.1",
+   "SPK.in.${SPK_L}",
+   "Spk L"
+  ],
+  [
+   "LIM.out.2",
+   "SPK.in.${SPK_R}",
+   "Spk R"
+  ]
+ ]
+}

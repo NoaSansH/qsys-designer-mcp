@@ -1,0 +1,339 @@
+{
+ "description": "Conference room: PC over the Core's USB speakerphone bridge (EC mode), a ceiling microphone over Dante that cancels echo itself (e.g. an array mic with its own AEC), the final speaker feed sent back to the mic as its AEC reference over Dante. Mic mute and meter, a 2 x 3 matrix (PC to the speakers, mic to the PC; mic never to the speakers), volume, EQ, limiter. Needs a Core with Flex channels for the speakers (SPK_L/SPK_R) and Software Dante.",
+ "params": {
+  "USB_IN": "USB EC Speakerphone 1 In",
+  "USB_OUT": "USB EC Speakerphone 1 Out",
+  "MIC_RX": "Mic-RX",
+  "REF_TX": "Ref-TX",
+  "OUTPUTS": "Flex Out",
+  "SPK_L": 1,
+  "SPK_R": 2
+ },
+ "param_help": {
+  "USB_IN": "Core placeable for audio from the PC",
+  "USB_OUT": "Core placeable for audio to the PC",
+  "MIC_RX": "Software Dante RX item for the mic",
+  "REF_TX": "Software Dante TX item for the AEC reference",
+  "OUTPUTS": "Core placeable for the speakers",
+  "SPK_L": "output channel, left",
+  "SPK_R": "output channel, right"
+ },
+ "core": {
+  "usb_bridge": {
+   "USBSlotType": "Speakerphone",
+   "SpeakerphoneMode": "WithEchoCancel"
+  }
+ },
+ "inventory": [
+  {
+   "type": "SoftDanteInput",
+   "name": "${MIC_RX}",
+   "set": {
+    "ChannelCount": "Dn8"
+   }
+  },
+  {
+   "type": "SoftDanteOutput",
+   "name": "${REF_TX}",
+   "set": {
+    "ChannelCount": "Dn8"
+   }
+  }
+ ],
+ "zones": {
+  "INPUTS": {
+   "fill": "#40D32F2F"
+  },
+  "MIC": {
+   "fill": "#4043A047"
+  },
+  "MIX": {
+   "fill": "#401E88E5"
+  },
+  "OUTPUT": {
+   "fill": "#40FB8C00"
+  },
+  "REFERENCE": {
+   "fill": "#40FFB300"
+  },
+  "TO PC": {
+   "fill": "#408E24AA"
+  }
+ },
+ "components": [
+  {
+   "name": "USB_IN",
+   "inventory": "${USB_IN}",
+   "zone": "INPUTS",
+   "label": "USB In\nPC",
+   "control_pins": [
+    "connected",
+    "active"
+   ],
+   "note": "PC audio (far end and\nPC sound), mono, EC mode."
+  },
+  {
+   "name": "MIC",
+   "inventory": {
+    "item": "${MIC_RX}",
+    "placeable": "Status/Control"
+   },
+   "zone": "INPUTS",
+   "label": "Dante RX\nMic",
+   "note": "Ceiling mic, channel 1:\nits automix output, AEC done."
+  },
+  {
+   "name": "MIC_MUTE",
+   "class": "gain",
+   "zone": "MIC",
+   "label": "Mic mute",
+   "script_access": "All",
+   "properties": {
+    "multi_channel_type": 1,
+    "multi_channel_count": 1,
+    "max_gain": 0,
+    "min_gain": -100
+   },
+   "values": {
+    "gain": 0,
+    "mute": false
+   },
+   "note": "Privacy button.\nAfter the mic's AEC."
+  },
+  {
+   "name": "MIC_METER",
+   "class": "meter2",
+   "zone": "MIC",
+   "label": "Mic meter",
+   "script_access": "External",
+   "properties": {
+    "multi_channel_type": 1,
+    "multi_channel_count": 1
+   },
+   "note": "meter_1, about -20 dBFS\npeaks in speech."
+  },
+  {
+   "name": "MIX",
+   "class": "mixer",
+   "zone": "MIX",
+   "label": "Room matrix\n2 x 3",
+   "properties": {
+    "n_inputs": 2,
+    "n_stereo_inputs": 0,
+    "n_outputs": 3,
+    "n_stereo_outputs": 0,
+    "input_bank_strategy": 0,
+    "output_bank_strategy": 0,
+    "crosspoint_mute": true,
+    "pan_strategy": 0,
+    "label_controls": true
+   },
+   "values": {
+    "input_1_output_1_gain": 0,
+    "input_1_output_1_mute": false,
+    "input_1_output_2_gain": 0,
+    "input_1_output_2_mute": false,
+    "input_1_output_3_gain": -100,
+    "input_1_output_3_mute": true,
+    "input_2_output_1_gain": -100,
+    "input_2_output_1_mute": true,
+    "input_2_output_2_gain": -100,
+    "input_2_output_2_mute": true,
+    "input_2_output_3_gain": 0,
+    "input_2_output_3_mute": false,
+    "input_1_label": "PC",
+    "input_2_label": "Mic",
+    "output_1_label": "Spk L",
+    "output_2_label": "Spk R",
+    "output_3_label": "To PC"
+   },
+   "note": "PC -> speakers, mic -> PC.\nMic never -> speakers,\nPC never -> PC."
+  },
+  {
+   "name": "VOL",
+   "class": "gain",
+   "zone": "OUTPUT",
+   "label": "Room volume",
+   "script_access": "External",
+   "properties": {
+    "multi_channel_type": 2,
+    "max_gain": 0,
+    "min_gain": -100
+   },
+   "note": "Stereo gain, panel volume.\nBefore the AEC reference."
+  },
+  {
+   "name": "EQ",
+   "class": "equalizer_parametric",
+   "zone": "OUTPUT",
+   "label": "Speaker EQ",
+   "properties": {
+    "multi_channel_type": 2,
+    "n_bands": 6,
+    "bandwidth_q_factor": 1
+   },
+   "values": {
+    "bypass_1": true,
+    "bypass_2": true,
+    "bypass_3": true,
+    "bypass_4": true,
+    "bypass_5": true,
+    "bypass_6": true
+   },
+   "note": "Flat, bands bypassed.\nTuned on site."
+  },
+  {
+   "name": "LIM",
+   "class": "limiter_peak",
+   "zone": "OUTPUT",
+   "label": "Speaker limiter",
+   "properties": {
+    "multi_channel_type": 2,
+    "b_has_sidechain": false
+   },
+   "values": {
+    "threshold_level": -3
+   },
+   "note": "Peak limiter at -3 dBFS,\nlast block before the amp."
+  },
+  {
+   "name": "SPK",
+   "shared": true,
+   "inventory": "${OUTPUTS}",
+   "zone": "OUTPUT",
+   "label": "Speakers",
+   "values": {
+    "channel_${SPK_L}_flex_output_enable": true,
+    "channel_${SPK_R}_flex_output_enable": true
+   },
+   "note": "Flex outputs to the speakers.\nSet Max Level to the amp's input."
+  },
+  {
+   "name": "REF_SUM",
+   "class": "mixer",
+   "zone": "REFERENCE",
+   "label": "Reference\nL+R -> mono",
+   "properties": {
+    "n_inputs": 2,
+    "n_stereo_inputs": 0,
+    "n_outputs": 1,
+    "n_stereo_outputs": 0,
+    "input_bank_strategy": 0,
+    "output_bank_strategy": 0,
+    "crosspoint_mute": false,
+    "pan_strategy": 0,
+    "label_controls": true
+   },
+   "values": {
+    "input_1_output_1_gain": -6,
+    "input_2_output_1_gain": -6
+   },
+   "note": "Final speaker feed, mono."
+  },
+  {
+   "name": "REF",
+   "inventory": {
+    "item": "${REF_TX}",
+    "placeable": "Status/Control"
+   },
+   "zone": "REFERENCE",
+   "label": "Dante TX\nAEC reference",
+   "values": {
+    "channel_1_label": "AEC_REF"
+   },
+   "note": "To the mic's AEC Reference\ninput. Never mute it."
+  },
+  {
+   "name": "USB_OUT",
+   "inventory": "${USB_OUT}",
+   "zone": "TO PC",
+   "label": "USB Out\nPC",
+   "control_pins": [
+    "active"
+   ],
+   "note": "Mic to the far end."
+  }
+ ],
+ "wires": [
+  [
+   "USB_IN.out.1",
+   "MIX.in.1",
+   "PC audio"
+  ],
+  [
+   "MIC.out.1",
+   "MIC_MUTE.in.1",
+   "Mic"
+  ],
+  [
+   "MIC_MUTE.out.1",
+   "MIX.in.2",
+   "Mic room"
+  ],
+  [
+   "MIC_MUTE.out.1",
+   "MIC_METER.in.1",
+   "Mic room"
+  ],
+  [
+   "MIX.out.1",
+   "VOL.in.1",
+   "Spk L mix"
+  ],
+  [
+   "MIX.out.2",
+   "VOL.in.2",
+   "Spk R mix"
+  ],
+  [
+   "VOL.out.1",
+   "EQ.in.1",
+   "Spk L vol"
+  ],
+  [
+   "VOL.out.2",
+   "EQ.in.2",
+   "Spk R vol"
+  ],
+  [
+   "EQ.out.1",
+   "LIM.in.1",
+   "Spk L EQ"
+  ],
+  [
+   "EQ.out.2",
+   "LIM.in.2",
+   "Spk R EQ"
+  ],
+  [
+   "LIM.out.1",
+   "SPK.in.${SPK_L}",
+   "Spk L"
+  ],
+  [
+   "LIM.out.2",
+   "SPK.in.${SPK_R}",
+   "Spk R"
+  ],
+  [
+   "LIM.out.1",
+   "REF_SUM.in.1",
+   "Spk L"
+  ],
+  [
+   "LIM.out.2",
+   "REF_SUM.in.2",
+   "Spk R"
+  ],
+  [
+   "REF_SUM.out.1",
+   "REF.in.1",
+   "AEC ref"
+  ],
+  [
+   "MIX.out.3",
+   "USB_OUT.in.1",
+   "To PC"
+  ]
+ ]
+}

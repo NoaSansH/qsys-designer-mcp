@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.5.0 (2026-10-22)
+
+- `check_simpl`: what a Crestron SIMPL program expects of the design, read from the program itself. Module instances, parameters and wired joins come from the `.smw`, their meaning from the modules' `.usp` (QscQsys library described: Fader, Meter, Camera, Snapshot Controller, Generic Boolean/Integer/String Component Control; others can be described), and the resulting contract is checked like `check_contract`.
+- `audit_design`: automatic review of the signal paths in the stored state and in every snapshot (mic to speakers, PC loop, AEC reference before the volume) and of the design's hygiene (unconnected blocks, limiter thresholds, high gains, blocks open to QRC).
+- Template library and `list_templates`: `conference_usb_dante_mic`, `conference_core_aec` and `speaker_zone`, included by name. Templates can share a block (`"shared": true`, placed once), carry inventory, Core settings and zones, and substitute params in keys.
+- A Core or device block placed twice is refused with a clear message (it made Designer fail).
+- List properties take the choice's name (`"output_choice": "Mix Only"`).
+- Designer 10.5: `probe_components` gives the choices' names again (fields that became properties are read either way).
+- Install commands and project links point to github.com/NoaSansH/qsys-designer-mcp.
+
+## 0.4.1 (2026-10-21)
+
+- Designer 10.5 (on .NET 10): the helper loads Designer's own System.Runtime.Serialization.Formatters (BinaryFormatter left the framework), sets up Designer's DesignRuntime before loading files, and finds the plugin catalog where 10.5 moved it. Builds, reading, editing, calibration, snapshots, scenarios and Check Design tested on 10.5.0.
+- Cached .NET helpers are redone when the helper changes (the whole helper is hashed, not its header).
+- Helper commands `types` and `members`, to follow Designer's classes when a version moves them.
+
+## 0.4.0 (2026-10-21)
+
+- `check_contract` and `list_controls`: what a control system or script expects of a design (blocks, Script Access, controls read or written), with near-miss suggestions.
+- `document_design`: an HTML document of a design, optionally with what every snapshot sets (read in emulation). `compare_designs`: what changed between two versions.
+- `make_test_uci`: a test UCI generated from the design (snapshot buttons, meters, gains and mutes, Text Controller states); `edit_design` gains `add_uci` and `remove_uci`.
+- `lua_test`: Text Controller scripts run outside Designer in a real Lua interpreter, against simulated Controls, Component.New, Timer (simulated clock), NamedControl and print.
+- Named Controls (`named_controls`, edit ops) and the number of Global Snapshots (`global_snapshot_count`).
+- Templates: `include` merges spec fragments with a prefix, parameters and an offset.
+- Real Core: `qrc_connect` and `save_snapshot_live`; changes to a real Core need `allow_changes`, and emulation tools always use the local emulator.
+- The .NET 8 helper for Designer 10 is rebuilt with every addition since 0.1.
+
 ## 0.3.0 (2026-10-21)
 
 - `edit_design`: changes a saved design operation by operation (values, properties, moves, blocks, wires, signal names, notes, snapshot banks) without rebuilding it, so snapshot contents and UCIs stay.

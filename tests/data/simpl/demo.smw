@@ -1,0 +1,66 @@
+[
+Version=1
+]
+[
+ObjTp=Sg
+H=4
+Nm=//__digital_reserved__
+]
+[
+ObjTp=Sg
+H=5
+Nm=Room_Vol_Up
+]
+[
+ObjTp=Sg
+H=6
+Nm=Cam_Privacy_On
+]
+[
+ObjTp=Sg
+H=7
+Nm=Cam_Privacy_Fb
+]
+[
+ObjTp=Sm
+H=10
+Nm=Qsys Fader.usp
+Cmn1=Room volume
+I1=5
+P1=
+P2=
+P3=1
+P4=ROOM_VOL
+P5=655d
+]
+[
+ObjTp=Sm
+H=11
+Nm=Qsys Camera.usp
+Cmn1=Room camera
+I1=4
+I3=6
+O2=7
+P1=
+P2=1
+P3=ROOM_CAM
+]
+[
+ObjTp=Sm
+H=12
+Nm=Qsys Generic Boolean Component Control.usp
+Cmn1=Logic flag
+P1=
+P2=
+P3=1
+P4=LOGIC
+P5=Busy
+]
+[
+ObjTp=Sm
+H=13
+Nm=Vendor Thing.usp
+Cmn1=Other
+P1=
+P2=SOMETHING
+]

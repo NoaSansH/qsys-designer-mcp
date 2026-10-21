@@ -40,6 +40,50 @@ static partial class QsysHelper
         return new JObject { { "path", outPath }, { "applied", done }, { "warnings", ctx.Warnings } };
     }
 
+    // controls: {path, components?: [names]} - every control of the blocks (id, name, type, range, pins)
+    static JObject Controls(JObject req)
+    {
+        var doc = Q.Load(Path.GetFullPath((string)req["path"]));
+        var want = req["components"] is JArray ? ((JArray)req["components"]).Select(x => (string)x).ToList() : null;
+        var res = new JObject();
+        foreach (var c in AllComponents(doc))
+        {
+            var name = NameOf(c);
+            if (want != null && !want.Contains(name)) continue;
+            var arr = ControlInfo(c);
+            foreach (JObject o in arr)
+            {
+                var d = Descriptor(c, (string)o["id"]);
+                var ps = Q.TryF(d, "PinStyle");
+                if (ps != null) o["pin_style"] = ps.ToString();
+            }
+            res[name] = new JObject { { "class", (string)Q.Get(c, "ClassName") }, { "script_access", Q.Get(c, "ScriptAccess").ToString() },
+                { "controls", arr } };
+        }
+        return new JObject { { "components", res } };
+    }
+
+    // types: {pattern} / members: {type} - for maintaining the helper when Designer moves its classes
+    static JObject Types(JObject req)
+    {
+        Type[] types;
+        try { types = Q.Asm.GetTypes(); } catch (System.Reflection.ReflectionTypeLoadException e) { types = e.Types.Where(x => x != null).ToArray(); }
+        var re = new System.Text.RegularExpressions.Regex((string)req["pattern"], System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        return new JObject { { "types", new JArray(types.Where(t => t.FullName != null && re.IsMatch(t.FullName)).Select(t => t.FullName).OrderBy(n => n).Take(400)) } };
+    }
+
+    static JObject Members(JObject req)
+    {
+        var t = Q.T((string)req["type"]);
+        var res = new JArray();
+        foreach (var m in t.GetMembers(Q.All | System.Reflection.BindingFlags.DeclaredOnly))
+        {
+            var mb = m as System.Reflection.MethodBase;
+            res.Add(m.MemberType + " " + m.Name + (mb != null ? "(" + string.Join(", ", mb.GetParameters().Select(p => p.ParameterType.FullName + " " + p.Name)) + ")" + (mb.IsStatic ? " static" : "") : ""));
+        }
+        return new JObject { { "type", t.FullName }, { "base", t.BaseType == null ? null : t.BaseType.FullName }, { "members", res } };
+    }
+
     static object EnsureManager()
     {
         var mgrField = Q.T("QSC.QSys.App").GetField("Manager", Q.All);
@@ -230,12 +274,45 @@ static partial class QsysHelper
             case "remove_graphic":
                 RemoveElement(ctx, Graphic(ctx, op));
                 return "ok";
+            case "add_named_control":
+                AddNamedControl(ctx, op);
+                return "ok";
+            case "remove_named_control":
+            {
+                var list = (IList)Q.Get(ctx.Doc, "ExternalControlIds");
+                var hit = list.Cast<object>().Where(x => Convert.ToString(Q.Get(x, "Id")) == (string)op["name"]).ToList();
+                if (hit.Count == 0) throw new Exception("no named control " + op["name"]);
+                foreach (var x in hit)
+                {
+                    try { Q.Call(x, "Delete"); } catch { }
+                    while (list.Contains(x)) list.Remove(x);
+                }
+                return "ok";
+            }
+            case "set_global_snapshot_count":
+                SetGlobalSnapshots(ctx.Doc, (int)op["count"]);
+                return "ok";
+            case "add_uci":
+            {
+                var sizes = new JArray();
+                var n = BuildUci(ctx.Doc, (JObject)op["uci"], ctx.Comps, sizes);
+                return new JObject { { "elements", n }, { "size", sizes.Count > 0 ? sizes[0] : null } };
+            }
+            case "remove_uci":
+            {
+                var panels = (IList)Q.Get(ctx.Doc, "WebPanels");
+                var hit = panels.Cast<object>().Where(pn => Convert.ToString(Q.Get(pn, "Title")) == (string)op["name"]).ToList();
+                if (hit.Count == 0) throw new Exception("no UCI named " + op["name"]);
+                foreach (var pn in hit) panels.Remove(pn);
+                return new JObject { { "removed", hit.Count } };
+            }
             case "add_snapshot_bank":
                 return BuildBank(ctx.Doc, (JObject)op["bank"], ctx.Comps, ctx.CompPage, ctx.Pages, ctx.PageNames[0]);
             default:
                 throw new Exception("unknown op; ops are set_value, set_values, set_property, move, set_label, set_access, rename, set_lua, " +
                     "add_control_pins, add_inventory, set_usb_bridge, set_design_properties, add_component, remove_component, add_wire, " +
-                    "remove_wire, add_signal, rename_signal, remove_signal, add_graphic, set_graphic, remove_graphic, add_snapshot_bank");
+                    "remove_wire, add_signal, rename_signal, remove_signal, add_graphic, set_graphic, remove_graphic, add_snapshot_bank, " +
+                    "add_uci, remove_uci, add_named_control, remove_named_control, set_global_snapshot_count");
         }
     }
 

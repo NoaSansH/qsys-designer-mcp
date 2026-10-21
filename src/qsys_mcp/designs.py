@@ -37,6 +37,7 @@ def validate(spec: dict, base_dir: str | Path | None = None) -> tuple[dict, list
     pages = spec.get("pages") or ["Main"]
     spec["pages"] = pages
     names: set[str] = set()
+    placed: dict[str, str] = {}
     for i, c in enumerate(spec.get("components", [])):
         where = f"components[{i}]"
         name = c.get("name")
@@ -48,6 +49,13 @@ def validate(spec: dict, base_dir: str | Path | None = None) -> tuple[dict, list
         kinds = [k for k in ("class", "inventory", "plugin", "plugin_file") if c.get(k)]
         if len(kinds) != 1 and set(kinds) != {"plugin", "plugin_file"}:
             problems.append(f"{name}: give exactly one of 'class', 'inventory' or 'plugin'")
+        inv = c.get("inventory")
+        if inv:
+            key = f"{inv.get('item', '')}/{inv.get('placeable', '')}" if isinstance(inv, dict) else str(inv)
+            if key in placed:
+                problems.append(f"{name}: {key} is already placed as {placed[key]}; a Core or device block goes "
+                                f"on the schematic once (wire both to it, or mark it \"shared\" in a template)")
+            placed[key] = name
         if not isinstance(c.get("control_pins", []), list):
             problems.append(f"{name}: control_pins must be a list of control ids")
         if c.get("page", pages[0]) not in pages:
@@ -177,7 +185,8 @@ def build(spec: dict, path: str, overwrite: bool = False, designer_version: str 
     if os.path.exists(path) and not overwrite:
         raise FileExistsError(f"{path} exists. Pick a new file name, or pass overwrite=True if replacing it is intended.")
     inst = headless.pick(designer_version)
-    from qsys_mcp import layout
+    from qsys_mcp import layout, templates
+    spec = templates.expand(spec, base_dir)                     # included templates merged in
     spec = layout.auto_layout(spec, layout.load_sizes(inst))   # x/y for unplaced blocks, notes, zones
     prepared, problems = validate(spec, base_dir)
     if problems:
@@ -201,7 +210,8 @@ def build(spec: dict, path: str, overwrite: bool = False, designer_version: str 
 EDIT_OPS = {"set_value", "set_values", "set_property", "move", "set_label", "set_access", "rename", "set_lua", "add_control_pins",
             "add_inventory", "set_usb_bridge", "set_design_properties", "add_component", "remove_component", "add_wire",
             "remove_wire", "add_signal", "rename_signal", "remove_signal", "add_graphic", "set_graphic", "remove_graphic",
-            "add_snapshot_bank"}
+            "add_snapshot_bank", "add_uci", "remove_uci", "add_named_control", "remove_named_control",
+            "set_global_snapshot_count"}
 
 
 def edit(path: str, ops: list[dict], out_path: str | None = None, base_dir: str | None = None) -> dict:

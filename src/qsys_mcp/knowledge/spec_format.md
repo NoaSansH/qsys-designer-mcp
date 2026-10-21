@@ -43,7 +43,9 @@ Each component needs exactly one of `class` or `inventory`.
 | `control_pins` | Control ids to expose as control pins (Properties > Control Pins), e.g. `["connected", "active"]` on a USB Speakerphone In, `["camera_status"]` on a camera. Wire them by pin name or by control id: `"USB_IN.out.connected"`. |
 | `plugin` | Instead of `class`: an installed schematic plugin, by its name (`"Category~Name"` or just `"Name"`) or id. It's looked for in Designer's Plugins and Assets folders under Documents\QSC. Encrypted plugins installed by the Asset Manager (`.qplugx2`) go by their asset name, e.g. `"Shure Microflex Advance"`. `plugin_file` takes a `.qplug` path instead. The plugin's code is saved inside the design. |
 
-`probe_components` lists each class's `property_choices`, so you can see what a numbered property means (for example `bandwidth_q_factor`: 0 Bandwidth, 1 Q-Factor).
+`probe_components` lists each class's `property_choices`, so you can see what a numbered property means (for example `bandwidth_q_factor`: 0 Bandwidth, 1 Q-Factor). A list property also takes the choice's name: `"output_choice": "Mix Only"`.
+
+A Core or device block (`inventory`) goes on the schematic once: wire everything that needs it to that one block.
 
 ### Stored values and positions
 
@@ -145,6 +147,44 @@ Notes and group boxes on the schematic:
 - Graphics drawn behind controls may still cover them: Designer has drawn graphic boxes on top of controls before. Open a page with group boxes in Designer to check it, and give a box under controls a translucent `fill` (alpha below `FF`), so the controls stay visible either way.
 - A Lua script can set a button's text at runtime with `Controls.X.Legend = "..."`. For that to show, leave `label` unset.
 
+## named_controls and global snapshots
+
+```json
+"named_controls": [{"name": "RoomVolume", "component": "ROOM_VOL", "control": "gain"}],
+"global_snapshot_count": 8
+```
+
+Named Controls (Named Controls pane) are reachable by name over QRC (`qrc_named_controls`) and from Lua (`NamedControl`). `global_snapshot_count` sets how many Global Snapshots the design has.
+
+## Templates
+
+A template is a JSON file holding part of a spec (components, wires, signals, graphics, snapshot_banks, named_controls, ucis, plus `params` defaults). A spec includes it as often as needed:
+
+```json
+"include": [{"file": "room.json", "prefix": "R2_", "params": {"ROOM": "Room 2"}, "dx": 0, "dy": 900, "page": "Room 2"}]
+```
+
+- `${NAME}` in the template is replaced by the param's value (a string that is only `${NAME}` keeps the value's type).
+- The template's blocks, banks, controllers, named controls, UCIs and signal names get the prefix; wire and signal endpoints follow, and endpoints to blocks outside the template keep their names.
+- Positions move by `dx`/`dy`; `page` puts everything on that page (added to `pages`). File paths are relative to the including spec's folder (`spec_dir`); templates can include templates.
+- A template block with `"shared": true` keeps its name and is placed once, however many times the template is included (a Core's Flex Out used by several zones): later copies only add their `values` and `control_pins` to it. A block of that name in the spec itself is used instead.
+- A template can also carry `inventory` (added once per name), `core` settings it needs (e.g. the USB bridge; the spec's own win), `zones` (prefixed with the include's prefix), and `description` / `param_help` for `list_templates`.
+
+The server comes with ready-made templates, listed with their params by `list_templates` and included by name:
+
+```json
+"include": [{"template": "speaker_zone", "prefix": "Z1_", "params": {"SPK_L": 1, "SPK_R": 2}},
+            {"template": "speaker_zone", "prefix": "Z2_", "params": {"SPK_L": 3, "SPK_R": 4}}]
+```
+
+| template | builds |
+|---|---|
+| `conference_usb_dante_mic` | PC on the Core's USB speakerphone bridge, a Dante ceiling mic that cancels echo itself, mic mute and meter, 2 x 3 matrix, volume, EQ, limiter, the final speaker feed back to the mic as its AEC reference |
+| `conference_core_aec` | two Flex mics into a 2-channel AEC (reference = final speaker feed), automixer, mic mute and meter, PC on USB, 2 x 3 matrix, volume, EQ, limiter |
+| `speaker_zone` | a 3-source stereo selector, zone volume, EQ and limiter to two output channels; once per zone with a prefix |
+
+Each builds with 0 Check Design errors and passes `audit_design`. Room-level values (EQ, Max Level, preamp gain) are left for the site.
+
 ## Automatic layout
 
 Blocks can be placed for you, along the signal flow:
@@ -179,6 +219,9 @@ Blocks can be placed for you, along the signal flow:
 | `add_signal`, `rename_signal`, `remove_signal` | `from`, `to`, `signal` / `signal`, `name` / `pin` or `signal` |
 | `add_graphic`, `set_graphic`, `remove_graphic` | `graphic` (as in `graphics`) / `text` + `set` / `text` |
 | `add_snapshot_bank` | `bank` (as in `snapshot_banks`); fill it with `record_snapshots` |
+| `add_uci`, `remove_uci` | `uci` (as in `ucis`) / `name` |
+| `add_named_control`, `remove_named_control` | `name`, `component`, `control` / `name` |
+| `set_global_snapshot_count` | `count` |
 
 Plugin blocks keep working in a saved design: their code is in the file, so their controls are available to `set_value` without the plugin being installed.
 
@@ -188,6 +231,15 @@ Two tools check a built design:
 
 - `read_design` reads a saved file back.
 - `check_design` runs static checks on it: unique names, unconnected pins, stored positions, and signal paths. Signal paths are written as `{"from": "FLEX_IN.out.3", "to": "USB_TX_CONF", "expect": false}`, with optional `via: [...]`. An AEC's Reference input counts as subtracted, not passed through.
+
+Other checks and documents:
+
+- `check_contract` checks what a control system or a script expects of the design: blocks by code name, Script Access (`qrc`, `script` or `both`) and the controls read or written. `list_controls` lists every control of the blocks.
+- `check_simpl` builds that contract from a Crestron SIMPL program (`.smw`) and its Q-SYS modules' `.usp` files (QscQsys library: Fader, Meter, Camera, Snapshot Controller, Generic Component Control), then checks it: each module instance's component name, and the controls it uses (for a camera, only the joins wired in the program). Other modules can be described with `modules`.
+- `audit_design` looks for what makes a room unusable: a mic reaching the speakers (feedback), a PC getting its own audio back, an AEC reference taken before the room volume, blocks with no connection, limiter thresholds above 0 dBFS, high stored gains, blocks open to QRC. Paths follow the wires and signal names through each block in its state (muted or -100 dB crosspoints, muted gains), in the stored values and, with `with_snapshots`, in every snapshot. `roles` names the mics, speakers, PC links, AEC reference and volume when the inferred ones aren't right.
+- `document_design` writes an HTML document of the design (inventory, blocks and settings, wires and signal names, snapshot banks and, with `with_snapshot_values`, what each snapshot sets, UCIs, notes). `compare_designs` lists what changed between two versions.
+- `make_test_uci` adds a test UCI generated from the design: snapshot buttons, meters, gains and mutes, Text Controller states.
+- `lua_test` runs a Text Controller's script outside Designer against simulated Controls, other blocks and timers.
 
 `designer_check` runs Designer's own Check Design and returns its errors, warnings and the licences the design needs.
 

@@ -66,6 +66,9 @@ static partial class QsysHelper
             case "copy": return Copy(req);
             case "copy_snapshots": return CopySnapshots(req);
             case "edit": return Edit(req);
+            case "controls": return Controls(req);
+            case "types": return Types(req);
+            case "members": return Members(req);
             default: throw new Exception("unknown command " + req["command"]);
         }
     }
@@ -404,7 +407,7 @@ static partial class QsysHelper
     // A schematic plugin, from an installed .qplug (by its name or id) or from a given file.
     static string PluginClass(JToken plugin, string pluginFile)
     {
-        var mgrT = Q.T("QSC.QSys.Design.Plugins.Manager");
+        var mgrT = Q.PluginManager;
         var files = new List<string>();
         if (pluginFile != null) files.Add(Path.GetFullPath(pluginFile));
         else
@@ -439,12 +442,22 @@ static partial class QsysHelper
             if (pluginFile == null && !(string.Equals(want, name, StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(want, shortName, StringComparison.OrdinalIgnoreCase) || string.Equals(want, id, StringComparison.OrdinalIgnoreCase)))
                 continue;
-            Q.Call(mgrT, "ReadPluginToCatalog", f, false);
             var all = (IDictionary)mgrT.GetProperty("AllPlugins", Q.All).GetValue(null, null);
-            foreach (DictionaryEntry kv in all)
-                if (string.Equals(Convert.ToString(Q.Get(kv.Value, "FilePath")), f, StringComparison.OrdinalIgnoreCase))
-                    return (string)Q.Get(kv.Value, "ClassId");
-            throw new Exception("Designer could not read the plugin " + f);
+            var before = new HashSet<object>(all.Keys.Cast<object>());
+            var managed = f.IndexOf(Path.DirectorySeparatorChar + "Assets" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) >= 0;
+            var errors = new List<string>();
+            // Designer 9.x reads the file; 10.5 may want the managed flag, or the text itself
+            foreach (var attempt in new Action[] {
+                () => Q.Call(mgrT, "ReadPluginToCatalog", f, managed),
+                () => Q.Call(mgrT, "ReadPluginToCatalog", f, !managed),
+                () => Q.Call(mgrT, "ReadPluginStringToCatalog", managed, File.ReadAllText(f), f) })
+            {
+                try { attempt(); } catch (Exception e) { errors.Add((e.InnerException ?? e).Message); }
+                foreach (DictionaryEntry kv in all)
+                    if (!before.Contains(kv.Key) || string.Equals(Convert.ToString(Q.Get(kv.Value, "FilePath")), f, StringComparison.OrdinalIgnoreCase))
+                        return (string)Q.Get(kv.Value, "ClassId");
+            }
+            throw new Exception("Designer could not read the plugin " + f + (errors.Count > 0 ? ": " + string.Join("; ", errors) : ""));
         }
         throw new Exception("plugin '" + want + "' is not installed (install it with Designer's Asset Manager, or give plugin_file); installed: " +
             (seen.Count == 0 ? "none" : string.Join(", ", seen)));
@@ -520,6 +533,10 @@ static partial class QsysHelper
         int graphics = 0;
         foreach (JObject gs in (spec["graphics"] as JArray ?? new JArray())) { AddGraphic(ctx, gs); graphics++; }
 
+        // named controls (Named Controls pane), and how many Global Snapshots the design has
+        foreach (JObject nc in (spec["named_controls"] as JArray ?? new JArray())) AddNamedControl(ctx, nc);
+        if (spec["global_snapshot_count"] != null) SetGlobalSnapshots(doc, (int)spec["global_snapshot_count"]);
+
         // snapshot banks and their Snapshot Controllers
         var banks = new JArray();
         foreach (JObject bs in (spec["snapshot_banks"] as JArray ?? new JArray()))
@@ -586,7 +603,7 @@ static partial class QsysHelper
         Q.Set(c, "CodeName", name);
         Q.Set(c, "UserLabel", (string)cs["label"] ?? name);
         SetAccess(c, (string)cs["script_access"] ?? "None");
-        if (((string)Q.Get(c, "ClassName")).StartsWith("%PLUGIN%")) Q.Call(Q.T("QSC.QSys.Design.Plugins.Manager"), "AddPluginComponent", c);
+        if (((string)Q.Get(c, "ClassName")).StartsWith("%PLUGIN%")) Q.Call(Q.PluginManager, "AddPluginComponent", c);
         AddControlPins(c, cs["control_pins"] as JArray);
         if ((string)Q.Get(c, "CodeName") != name) ctx.Warnings.Add(name + ": Designer renamed it to " + Q.Get(c, "CodeName"));
         ctx.Comps[name] = c;
@@ -658,6 +675,34 @@ static partial class QsysHelper
             throw new Exception(e[1] + " already carries the signal name '" + current + "', not '" + e[2] + "'");
         NameSignal(ctx, a, e[0], e[2]);
         Q.Set(b, "Label", e[2]);
+    }
+
+    // {"name": "RoomVolume", "component": "VOL", "control": "gain"}
+    static object AddNamedControl(Ctx ctx, JObject nc)
+    {
+        object c;
+        if (!ctx.Comps.TryGetValue((string)nc["component"], out c)) throw new Exception("named control " + nc["name"] + ": no component " + nc["component"]);
+        var id = (string)nc["control"];
+        if (Descriptor(c, id) == null) throw new Exception("named control " + nc["name"] + ": " + nc["component"] + " has no control " + id);
+        var list = (IList)Q.Get(ctx.Doc, "ExternalControlIds");
+        if (list.Cast<object>().Any(x => Convert.ToString(Q.Get(x, "Id")) == (string)nc["name"]))
+            throw new Exception("a named control is already called " + nc["name"]);
+        var el = Activator.CreateInstance(Q.T("QSC.QSys.Design.ExternalControlId"), true);
+        Q.Set(el, "Component", c);
+        Q.Set(el, "BaseControlId", id);
+        Q.Set(el, "Id", (string)nc["name"]);
+        list.Add(el);
+        // attaching the new element lists it a second time: keep one
+        for (int i = list.Count - 1; i >= 0 && list.Cast<object>().Count(x => x == el) > 1; i--)
+            if (list[i] == el) list.RemoveAt(i);
+        return el;
+    }
+
+    static void SetGlobalSnapshots(object doc, int count)
+    {
+        var global = Q.L(Q.Get(doc, "Snapshots")).FirstOrDefault(b => b.GetType().Name == "GlobalBank");
+        if (global == null) throw new Exception("this design has no Global snapshot bank");
+        Q.Set(global, "Count", count);
     }
 
     static object AddGraphic(Ctx ctx, JObject gs)
@@ -1024,6 +1069,7 @@ static partial class QsysHelper
         foreach (var c in comps)
         {
             var o = new JObject { { "name", NameOf(c) }, { "class", (string)Q.Get(c, "ClassName") }, { "label", Convert.ToString(Q.Get(c, "Label")) },
+                { "user_label", Convert.ToString(Q.TryGet(c, "UserLabel")) },
                 { "page", pageOf[c] }, { "script_access", Q.Get(c, "ScriptAccess").ToString() } };
             var pos = (System.Windows.Point)Q.Get(c, "Position");
             o["x"] = pos.X; o["y"] = pos.Y;
@@ -1141,6 +1187,12 @@ static partial class QsysHelper
                 { "controls", ctl }, { "saved_snapshots", new JArray(stored) } });
         }
         res["snapshot_banks"] = banks;
+        res["named_controls"] = new JArray(Q.L(Q.Get(doc, "ExternalControlIds")).Select(x => new JObject {
+            { "name", Convert.ToString(Q.Get(x, "Id")) },
+            { "component", Q.Get(x, "Component") == null ? null : NameOf(Q.Get(x, "Component")) },
+            { "control", Convert.ToString(Q.Get(x, "BaseControlId")) } }));
+        var gb = Q.L(Q.Get(doc, "Snapshots")).FirstOrDefault(b => b.GetType().Name == "GlobalBank");
+        if (gb != null) res["global_snapshot_count"] = (int)Q.Get(gb, "Count");
         return res;
     }
 

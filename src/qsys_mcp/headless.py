@@ -127,6 +127,9 @@ def is_dotnet_core(inst: Install) -> bool:
     return (inst.folder / "Q-Sys Designer.dll").is_file() and (inst.folder / "Q-Sys Designer.runtimeconfig.json").is_file()
 
 
+NET_SETUP = "2"   # 2: Designer's app-local packages (BinaryFormatter on .NET 9+)
+
+
 def _net8_helper(inst: Install) -> Path:
     """Designer 10+: the prebuilt helper (no QSC code), set to run on exactly Designer's own runtime."""
     pkg = Path(str(resources.files("qsys_mcp.helper"))) / "net8"
@@ -136,8 +139,13 @@ def _net8_helper(inst: Install) -> Path:
     designer_cfg = json.loads((inst.folder / "Q-Sys Designer.runtimeconfig.json").read_text(encoding="utf-8-sig"))
     opts = designer_cfg.get("runtimeOptions", {})
     frameworks = opts.get("frameworks") or [opts["framework"]]
-    digest = hashlib.sha256((inst.version + (pkg / "qhelper.dll").read_bytes().hex()[:4096] + json.dumps(frameworks)).encode()).hexdigest()[:12]
-    out_dir = cache_dir() / "helper" / f"{inst.version}-net-{digest}"
+    # the whole helper is hashed: a rebuilt one differs well after its (identical) PE header
+    # NET_SETUP: bump when the way the helper is set up changes, so cached copies are redone
+    h = hashlib.sha256((NET_SETUP + inst.version + json.dumps(frameworks)).encode())
+    for f in sorted(pkg.iterdir()):
+        if f.suffix in (".dll", ".exe", ".json"):
+            h.update(f.read_bytes())
+    out_dir = cache_dir() / "helper" / f"{inst.version}-net-{h.hexdigest()[:12]}"
     exe = out_dir / "qhelper.exe"
     if exe.is_file():
         return exe
@@ -145,10 +153,48 @@ def _net8_helper(inst: Install) -> Path:
     for f in pkg.iterdir():
         if f.suffix in (".dll", ".exe", ".json"):
             (out_dir / f.name).write_bytes(f.read_bytes())
+    _bring_designer_packages(inst, out_dir)
     cfg = {"runtimeOptions": {"tfm": opts.get("tfm", "net8.0"), "frameworks": frameworks,
                               "configProperties": {"System.Runtime.Serialization.EnableUnsafeBinaryFormatterSerialization": True}}}
     (out_dir / "qhelper.runtimeconfig.json").write_text(json.dumps(cfg, indent=2), encoding="utf-8")
     return exe
+
+
+# Packages Designer ships next to itself that must win over the runtime's own copy. On .NET 9 and
+# later, BinaryFormatter (which .qsys files use) only works from the System.Runtime.Serialization.Formatters
+# package; the framework's assembly of that name is a stub that throws.
+APP_LOCAL_PACKAGES = ("System.Runtime.Serialization.Formatters",)
+
+
+def _bring_designer_packages(inst: Install, out_dir: Path) -> None:
+    deps_file = inst.folder / "Q-Sys Designer.deps.json"
+    if not deps_file.is_file():
+        return
+    designer = json.loads(deps_file.read_text(encoding="utf-8-sig"))
+    target = {}   # packages may sit under the plain target or the runtime one (".../win-x64")
+    for libs in designer.get("targets", {}).values():
+        target.update({k: v for k, v in libs.items() if v.get("runtime")})
+    mine_file = out_dir / "qhelper.deps.json"
+    mine = json.loads(mine_file.read_text(encoding="utf-8-sig"))
+    my_target = next(iter(mine["targets"].values()))
+    changed = False
+    for key, lib in target.items():
+        name = key.split("/")[0]
+        if name not in APP_LOCAL_PACKAGES:
+            continue
+        for asset_path, info in (lib.get("runtime") or {}).items():
+            dll = inst.folder / Path(asset_path).name
+            if not dll.is_file():
+                continue
+            (out_dir / dll.name).write_bytes(dll.read_bytes())
+            # declared as a project-local file next to the helper, with Designer's versions, so the host
+            # prefers it to the framework's lower file version
+            my_target[key] = {"runtime": {dll.name: info}}
+            mine["libraries"][key] = {"type": "project", "serviceable": False, "sha512": ""}
+            my_target["qhelper/1.0.0"].setdefault("dependencies", {})[name] = key.split("/")[1]
+            changed = True
+    if changed:
+        mine_file.write_text(json.dumps(mine, indent=2), encoding="utf-8")
 
 
 def helper_exe(inst: Install) -> Path:
