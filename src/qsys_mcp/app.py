@@ -478,7 +478,7 @@ class Designer:
             buf = ctypes.create_string_buffer(width * height * 4)
             if not g32.GetDIBits(mdc, bmp, 0, height, buf, ctypes.byref(bi), 0):
                 return None
-            img = Image.frombuffer("RGB", (width, height), buf, "raw", "BGRX", 0, 1)
+            img = Image.frombytes("RGB", (width, height), buf.raw, "raw", "BGRX", 0, 1)   # a copy: buf is freed on return
             return img if img.getbbox() else None            # all black: nothing was drawn
         finally:
             g32.DeleteObject(bmp)
