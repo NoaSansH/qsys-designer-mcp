@@ -124,6 +124,12 @@ static class Q
 
     // A loaded design's plugin blocks only offer their controls once Designer knows their class. The
     // design carries each plugin's code (plugin_source), so the class is registered from it.
+    public static void RegisterPlugin(string cls, string source)
+    {
+        var add = PluginManager.GetMethods(All).First(m => m.Name == "AddPlugin");
+        add.Invoke(null, new object[] { cls, source, null });
+    }
+
     static void RegisterPlugins(object doc)
     {
         var add = PluginManager.GetMethods(All).First(m => m.Name == "AddPlugin");

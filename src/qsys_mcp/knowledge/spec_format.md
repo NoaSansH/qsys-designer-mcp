@@ -206,6 +206,10 @@ Blocks can be placed for you, along the signal flow:
 - `note` on a block puts a note under it (also with blocks you placed yourself).
 - Block sizes come from what Designer actually drew for that kind of block, learned by `learn_block_sizes` and by `record_snapshots`; otherwise they're estimated from the label and the pins. Keep labels short: Designer cuts long ones.
 
+## Exporting a design
+
+`export_design` writes any saved design back as a spec (`spec`) with its snapshot contents (`snapshots`). `build_design` on the spec gives the same design: blocks and their positions, the properties that differ from each class's defaults, stored values with their positions, wires and signal names, links by name (`signals`), notes and zones, snapshot banks and controllers, named controls, UCIs element by element. `record_snapshots` with `snapshots` then puts the snapshot contents back. Plugin blocks keep their plugin's code (`plugin_source`), so the plugin needn't be installed; Text Controllers keep their configuration as it is (`text_controller.config`) and their Lua. Core and device blocks come back as `inventory` placeables, devices with their model and settings (`set`, `usb_bridge`), and the File > Design Properties that were changed.
+
 ## Editing a design
 
 `edit_design` changes a saved file without rebuilding it, so everything else stays, snapshot contents included. Operations run in order:

@@ -240,6 +240,28 @@ def compare_designs(path_a: str, path_b: str, positions: bool = False, snapshot_
     return report.diff(a, b, positions, sa, sb)
 
 
+@tool(WRITES_FILE)
+def export_design(path: str, out_json: str | None = None, overwrite: bool = False) -> dict:
+    """Write a saved design back as a spec, so it can be changed and built again: build_design on the
+    spec gives the same design (blocks, properties that differ from the defaults, stored values with their
+    positions, wires and signal names, notes and zones, snapshot banks, named controls, UCIs element by
+    element), and record_snapshots with the exported "snapshots" puts its snapshot contents back. Works on
+    designs made by hand in Designer. Plugin blocks carry their plugin's code, Text Controllers their
+    configuration and Lua. With out_json the result is also written there (JSON)."""
+    import json as _json
+    from qsys_mcp import export
+    out = export.export(path)
+    if out_json:
+        if os.path.exists(out_json) and not overwrite:
+            raise FileExistsError(f"{out_json} exists; pass overwrite=True to replace it")
+        with open(out_json, "w", encoding="utf-8") as fh:
+            _json.dump(out, fh, ensure_ascii=False, indent=1)
+        out = {"path": os.path.abspath(out_json), "components": len(out["spec"]["components"]),
+               "wires": len(out["spec"].get("wires", [])), "snapshot_banks": {b: len(s["snapshots"]) for b, s in out["snapshots"].items()},
+               "notes": out["notes"]}
+    return out
+
+
 @tool(READ_ONLY)
 def read_snapshots(path: str, banks: list[str] | None = None) -> dict:
     """What every saved snapshot of a design sets, read straight from the file (no Designer window, no

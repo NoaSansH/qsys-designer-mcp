@@ -22,6 +22,7 @@ An MCP server that lets Claude, or any other MCP client, build Q-SYS designs. Yo
   - multi-page schematics, and multi-page UCIs with their size, frames and headers
   - automatic layout along the signal flow, with zones and notes
 - **Look things up.** `probe_components` tells you a component class's properties, pins and controls, and what I/O a Core offers. Claude doesn't have to guess names.
+- **Export any design as a spec** (`export_design`), including one drawn by hand in Designer: build the spec again and you get the same design, positions, UCIs and snapshot contents included. Change the spec to rework the design.
 - **Edit a saved design** operation by operation (`edit_design`): move, rewire, set a value or a plugin's IP, add or remove blocks, without rebuilding and without losing snapshot contents.
 - **Read any design back,** including ones it didn't build: components, properties, stored values, pins, wires and UCIs, and what each snapshot sets (`read_snapshots`), straight from the file without emulation.
 - **Check signal flow statically** over the real wiring, for example "mic 1 reaches the USB send", "the laptop never reaches the far end", "the echo canceller's reference carries the far end", or "no unconnected pins".
@@ -148,7 +149,7 @@ Because it relies on undocumented internals, any Designer update could break it.
 | Area | Tools |
 |---|---|
 | Learn | `designer_versions`, `probe_components`, `list_templates` |
-| Build, edit and check | `build_design`, `edit_design`, `read_design`, `read_snapshots`, `list_controls`, `check_design`, `check_contract`, `check_simpl`, `audit_design`, `designer_check`, `learn_block_sizes` |
+| Build, edit and check | `build_design`, `edit_design`, `export_design`, `read_design`, `read_snapshots`, `list_controls`, `check_design`, `check_contract`, `check_simpl`, `audit_design`, `designer_check`, `learn_block_sizes` |
 | Document | `document_design`, `compare_designs`, `make_test_uci`, `preview_design` |
 | Run | `designer_status`, `open_design`, `close_design`, `emulate_design`, `stop_emulation`, `list_dialogs`, `dialog_button`, `screenshot` |
 | Stored values and snapshots | `calibrate_values`, `record_snapshots` |
