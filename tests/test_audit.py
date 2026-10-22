@@ -52,3 +52,36 @@ def test_reference_before_the_volume_is_flagged():
     d["wires"] = [w for w in d["wires"] if w != ["VOL.out.1", "REF.in.1"]] + [["MIX.out.1", "REF.in.1"]]
     r = audit.audit(d, {"aec_reference": "REF.in.1", "volume": "VOL"})
     assert any(f["rule"].startswith("AEC reference") for f in r["findings"])
+
+
+def chain(gain_db, threshold=None, second_source=False):
+    """SRC (-20 dBFS) [+ SRC2] -> MIX -> G (gain) [-> LIM] -> OUT"""
+    comps = [comp("SRC", "usb_receiver", [pin("out", 1, "Channel 1")]),
+             comp("SRC2", "soft_dante_input", [pin("out", 1, "Channel 1")]),
+             comp("MIX", "mixer", [pin("in", 1, "Input 1"), pin("in", 2, "Input 2"), pin("out", 1, "Output 1")],
+                  {"input_1_output_1_mute": {"value": 0}, "input_2_output_1_mute": {"value": 0 if second_source else 1}}),
+             comp("G", "gain", [pin("in", 1, "Input"), pin("out", 1, "Output")], {"gain": {"value": gain_db}, "mute": {"value": 0}}),
+             comp("OUT", "io_card_flex_out_core", [pin("in", 1, "Channel 1")]),
+             comp("M", "meter2", [pin("in", 1, "Input 1")])]
+    wires = [["SRC.out.1", "MIX.in.1"], ["SRC2.out.1", "MIX.in.2"], ["MIX.out.1", "G.in.1"], ["G.out.1", "M.in.1"]]
+    if threshold is not None:
+        comps.append(comp("LIM", "limiter_peak", [pin("in", 1, "Input"), pin("out", 1, "Output")], {"threshold_level": {"value": threshold}}))
+        wires += [["G.out.1", "LIM.in.1"], ["LIM.out.1", "OUT.in.1"]]
+    else:
+        wires.append(["G.out.1", "OUT.in.1"])
+    return {"components": comps, "wires": wires}
+
+
+def test_gain_structure_levels():
+    assert audit.gain_structure(chain(0))["outputs"] == {"OUT.in.1": -20.0}          # a meter is not an output
+    assert audit.gain_structure(chain(0, second_source=True))["outputs"] == {"OUT.in.1": -17.0}   # two sources add up
+    assert audit.gain_structure(chain(30, threshold=-3))["outputs"] == {"OUT.in.1": -3.0}         # the limiter caps it
+    assert audit.gain_structure(chain(0), levels={"SRC": -10})["outputs"] == {"OUT.in.1": -10.0}
+
+
+def test_gain_structure_findings():
+    rules = lambda d: {f["rule"] for f in audit.audit(d)["findings"] if f["severity"] != "info"}
+    assert "clipping at nominal level" in rules(chain(25))
+    assert "little headroom at an output" in rules(chain(16))
+    assert "very low level at an output" in rules(chain(-30))
+    assert not rules(chain(0)) - {"block with no connection"}

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.0 (2026-10-22)
+
+- `export_design`: any saved design, including one made by hand in Designer, written back as a spec that builds the same design (positions, properties, values, wires and signal names, notes, banks, named controls, UCIs element by element), with its snapshot contents for `record_snapshots`. `read_design` now tells which device and placeable each Core or device block comes from, devices' models and settings, USB bridges, changed Design Properties, control pins, non-audio pins, and every UCI element's look. `build_design` takes a plugin's saved code (`plugin_source`) and a Text Controller's raw configuration.
+- `audit_design` checks the gain structure: a nominal level from every source through gains, mixer gains and limiters, summed where sources meet; clipping, little headroom and levels lost in the noise at outputs, per state, with each output's level. A finding seen in several states is listed once.
+- Dante subscriptions (`dante_subscriptions`) and AES67 streams (`aes67_stream`) set in the spec; the audit warns about Dante channels in use with no subscription and AES67 receivers in use with no stream.
+- `find_cores` lists the Q-SYS Cores announcing themselves on the network; `send_to_core` first checks one has the design's Core name. `edit_design` op `rename_inventory` renames the Core or a device. README: first time with a real Core, step by step.
+- `make_room_uci`: the users' UCI from the design (room modes, volume, mic mute, camera presets, privacy, page tabs, logo), laid out without overlaps.
+- CI on Python 3.11, 3.13 and 3.14; a tag makes a GitHub release with the package; PyPI publishing ready to switch on.
+
 ## 0.6.1 (2026-10-22)
 
 - `edit_design` op `set_uci_element`: one element of a saved UCI moved, resized or relabelled, found by its text or its control (exactly one must match), without rebuilding the UCI.

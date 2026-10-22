@@ -41,6 +41,7 @@ def validate(spec: dict, base_dir: str | Path | None = None) -> tuple[dict, list
     for i, c in enumerate(spec.get("components", [])):
         where = f"components[{i}]"
         name = c.get("name")
+        problems += _network_audio(c, where)
         if not name or not NAME_RE.match(name):
             problems.append(f"{where}: name {name!r} must start with a letter and use letters, digits, _ or -")
         elif name in names:
@@ -145,6 +146,19 @@ def validate(spec: dict, base_dir: str | Path | None = None) -> tuple[dict, list
     return spec, problems
 
 
+def _uci_media(u: dict, base_dir) -> list[str]:
+    """A UCI's image files read into the spec (images and buttons drawn with images)."""
+    problems = []
+    for p in u.get("pages", []):
+        for j, e in enumerate(p.get("elements", [])):
+            where = f"UCI {u.get('name')}/{p.get('name')} element {j}"
+            if e.get("type") == "image":
+                problems += _load_image(e, None, where, base_dir)
+            for k in [k for k in e if k.startswith("image_")]:
+                problems += _load_image(e, k, where, base_dir)
+    return problems
+
+
 IMAGE_TYPES = {".png": "png", ".jpg": "jpg", ".jpeg": "jpg", ".gif": "gif", ".bmp": "bmp", ".svg": "svg"}
 UCI_NAVIGATION = ("None", "Left", "Right", "Top", "Bottom")
 
@@ -175,6 +189,30 @@ def _load_image(e: dict, key: str | None, where: str, base_dir) -> list[str]:
     else:
         e[key] = {"data": data, "format": fmt}
     return []
+
+
+def _network_audio(c: dict, where: str) -> list[str]:
+    """dante_subscriptions {"1": "Device@Channel"} and aes67_stream "name" become the block's stored values."""
+    problems = []
+    subs = c.pop("dante_subscriptions", None)
+    if subs is not None:
+        if not isinstance(subs, dict):
+            return [f"{where}: dante_subscriptions must be {{\"channel\": \"Device@Channel\"}}"]
+        values = c.setdefault("values", {})
+        for ch, target in subs.items():
+            if not str(ch).isdigit() or not isinstance(target, str) or target.count("@") != 1 or target.startswith("@"):
+                problems.append(f"{where}: dante_subscriptions {ch!r}: {target!r} should be \"Device@Channel\" for a channel number")
+                continue
+            device, channel = target.split("@")
+            values[f"channel_{int(ch)}_subscription_device"] = device
+            values[f"channel_{int(ch)}_subscription_channel"] = channel
+    stream = c.pop("aes67_stream", None)
+    if stream is not None:
+        if not isinstance(stream, str) or not stream:
+            problems.append(f"{where}: aes67_stream must be the stream's name as announced (SAP)")
+        else:
+            c.setdefault("values", {})["stream_name"] = stream
+    return problems
 
 
 def _is_int(v) -> bool:
@@ -252,7 +290,7 @@ def build(spec: dict, path: str, overwrite: bool = False, designer_version: str 
 EDIT_OPS = {"set_value", "set_values", "set_property", "move", "set_label", "set_access", "rename", "set_lua", "add_control_pins",
             "add_inventory", "set_usb_bridge", "set_design_properties", "add_component", "remove_component", "add_wire",
             "remove_wire", "add_signal", "rename_signal", "remove_signal", "add_graphic", "set_graphic", "remove_graphic",
-            "add_snapshot_bank", "add_uci", "remove_uci", "set_uci_element", "add_named_control", "remove_named_control",
+            "add_snapshot_bank", "add_uci", "remove_uci", "set_uci_element", "rename_inventory", "add_named_control", "remove_named_control",
             "set_global_snapshot_count"}
 
 
@@ -275,6 +313,8 @@ def edit(path: str, ops: list[dict], out_path: str | None = None, base_dir: str 
             name = (op.get("component") or {}).get("name")
             if not name or not NAME_RE.match(name):
                 problems.append(f"ops[{i}]: the new component needs a valid name, not {name!r}")
+        elif kind == "add_uci" and isinstance(op.get("uci"), dict):
+            problems += _uci_media(op["uci"], base_dir)
         elif kind == "set_lua" and "lua" in op:
             from qsys_mcp import lua
             chk = lua.check_syntax(op["lua"])

@@ -193,9 +193,12 @@ def audit_design(path: str, roles: dict | None = None, with_snapshots: bool = Tr
     (feedback), a PC getting its own audio back (echo, loop), an AEC reference not taken after the room
     volume, blocks with no connection, limiter thresholds above 0 dBFS, high stored gains, blocks open to
     QRC. Paths follow the wiring through each block in its state: muted or -100 dB crosspoints and muted
-    gains stop them. with_snapshots also checks every saved snapshot (read from the file). roles, when
-    the inferred ones aren't right: {"mics": [...], "speakers": [...], "pc_links": [[in, out]],
-    "aec_reference": "BLOCK.in.N", "volume": "BLOCK"} (blocks or pins)."""
+    gains stop them. Gain structure: a nominal level (-20 dBFS) leaves every source and follows the gains,
+    mixer gains and limiters; clipping, little headroom (above -6 dBFS) or a level lost in the noise (below
+    -45 dBFS) at an output are reported, and output_levels gives each output's level in each state.
+    with_snapshots also checks every saved snapshot (read from the file). roles, when the inferred ones
+    aren't right: {"mics": [...], "speakers": [...], "pc_links": [[in, out]], "aec_reference": "BLOCK.in.N",
+    "volume": "BLOCK", "levels": {"BLOCK" or "BLOCK.out.N": dBFS}} (blocks or pins)."""
     from qsys_mcp import audit, snapshotdata
     design = designs.read(path)
     values = snapshotdata.contents(path, design) if with_snapshots else None
@@ -240,6 +243,28 @@ def compare_designs(path_a: str, path_b: str, positions: bool = False, snapshot_
     return report.diff(a, b, positions, sa, sb)
 
 
+@tool(WRITES_FILE)
+def export_design(path: str, out_json: str | None = None, overwrite: bool = False) -> dict:
+    """Write a saved design back as a spec, so it can be changed and built again: build_design on the
+    spec gives the same design (blocks, properties that differ from the defaults, stored values with their
+    positions, wires and signal names, notes and zones, snapshot banks, named controls, UCIs element by
+    element), and record_snapshots with the exported "snapshots" puts its snapshot contents back. Works on
+    designs made by hand in Designer. Plugin blocks carry their plugin's code, Text Controllers their
+    configuration and Lua. With out_json the result is also written there (JSON)."""
+    import json as _json
+    from qsys_mcp import export
+    out = export.export(path)
+    if out_json:
+        if os.path.exists(out_json) and not overwrite:
+            raise FileExistsError(f"{out_json} exists; pass overwrite=True to replace it")
+        with open(out_json, "w", encoding="utf-8") as fh:
+            _json.dump(out, fh, ensure_ascii=False, indent=1)
+        out = {"path": os.path.abspath(out_json), "components": len(out["spec"]["components"]),
+               "wires": len(out["spec"].get("wires", [])), "snapshot_banks": {b: len(s["snapshots"]) for b, s in out["snapshots"].items()},
+               "notes": out["notes"]}
+    return out
+
+
 @tool(READ_ONLY)
 def read_snapshots(path: str, banks: list[str] | None = None) -> dict:
     """What every saved snapshot of a design sets, read straight from the file (no Designer window, no
@@ -263,6 +288,25 @@ def make_test_uci(path: str, name: str = "Test", out_path: str | None = None, wi
     res = designs.edit(path, ops, out_path)
     return {"path": res["path"], "uci": name, "pages": [p["name"] for p in uci["pages"]],
             "elements": sum(len(p["elements"]) for p in uci["pages"])}
+
+
+@tool(WRITES_FILE)
+def make_room_uci(path: str, name: str = "Salle", out_path: str | None = None, roles: dict | None = None,
+                  logo: str | None = None, lang: str = "fr", width: int = 1280, height: int = 800) -> dict:
+    """Add the UCI a room's users touch, generated from the design: Home with the room modes (a snapshot
+    bank's Load buttons), the mic mute and the room volume; Audio with each volume when there are several;
+    Camera with the camera presets (a second bank) and privacy; page tabs when there are several pages; an
+    optional logo (image file). What is what is found in the design, or given in roles:
+    {"modes": {"controller": "...", "labels": [...]}, "volumes": [...], "mic_mute": "...",
+     "camera": {"controller": "...", "labels": [...]}, "privacy": {"component": "...", "control": "..."}}.
+    lang fr or en. Writes `path` in place unless out_path (a new file); a UCI of that name is replaced."""
+    from qsys_mcp import roompanel
+    design = designs.read(path)
+    uci = roompanel.build(design, name, width, height, roles, os.path.abspath(logo) if logo else None, lang)
+    ops = ([{"op": "remove_uci", "name": name}] if any(u["name"] == name for u in design.get("ucis", [])) else []) +           [{"op": "add_uci", "uci": uci}]
+    res = designs.edit(path, ops, out_path)
+    return {"path": res["path"], "uci": name, "pages": [p["name"] for p in uci["pages"]],
+            "elements": sum(len(p["elements"]) for p in uci["pages"]), "roles": roompanel.roles(design, roles)}
 
 
 @tool(READ_ONLY)
@@ -550,17 +594,40 @@ async def pull_core_snapshots(path: str, banks: list[str] | None = None, numbers
     return out
 
 
+@tool(LIVE_READ)
+def find_cores(seconds: float = 5.0) -> dict:
+    """The Q-SYS Cores (and other Q-SYS devices) announcing themselves on this PC's networks during
+    `seconds`: name, model, addresses, primary or not. Only listens. A design reaches the Core whose name
+    is the design's Core name, so this is the check before send_to_core. Windows may ask once whether
+    Python may receive on the network."""
+    from qsys_mcp import discovery
+    devices = discovery.listen(seconds)
+    return {"cores": discovery.cores(devices), "other_devices": [d for d in devices if d not in discovery.cores(devices)],
+            "listened_s": seconds}
+
+
 @tool(APP_SAFE)
-def send_to_core(path: str, confirm: bool = False, discard_changes: bool = False, wait: float = 60) -> dict:
+def send_to_core(path: str, confirm: bool = False, discard_changes: bool = False, wait: float = 60,
+                 check_network: bool = True) -> dict:
     """Open a design in Designer and run File > Save to Core & Run: the Core named in the design gets
     it and runs it, replacing what it runs. Only with confirm=True, which the user must have asked for.
     Designer finds the Core by the design's Core name; a login, a choice of Core or a confirmation it
     asks for is returned (list_dialogs / dialog_button), never answered here, and credentials are the
-    user's to type. If no Core answers within `wait` seconds the request is cancelled and that is said."""
+    user's to type. If no Core answers within `wait` seconds the request is cancelled and that is said.
+    check_network first listens for Cores (find_cores) and stops if none has the design's Core name."""
     if not confirm:
         raise ValueError("Sending a design replaces what the Core runs: ask the user, then call again with confirm=True.")
+    core_name = designs.read(path).get("core", {}).get("name")
+    heard = None
+    if check_network:              # a Core named otherwise would keep Designer searching: say it now
+        from qsys_mcp import discovery
+        heard = discovery.cores(discovery.listen(4.0))
+        if heard and core_name not in [d["name"] for d in heard]:
+            raise ValueError(f"The design's Core is named {core_name!r}, but the Cores on the network are "
+                             f"{[d['name'] for d in heard]}. Rename the design's Core (edit_design op rename_inventory) "
+                             "to the one it should run on, then send again.")
     opened = designer.open_design(path, discard_changes)
-    return {"opened": opened, "core_name": designs.read(path).get("core", {}).get("name"), **designer.send_to_core(wait)}
+    return {"opened": opened, "core_name": core_name, "cores_heard": heard, **designer.send_to_core(wait)}
 
 
 @tool(APP_SAFE)

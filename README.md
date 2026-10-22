@@ -21,16 +21,19 @@ An MCP server that lets Claude, or any other MCP client, build Q-SYS designs. Yo
   - snapshot banks with their Snapshot Controllers, and their contents (`record_snapshots`)
   - multi-page schematics, and multi-page UCIs with their size, frames and headers
   - automatic layout along the signal flow, with zones and notes
+  - Dante subscriptions of Software Dante receivers and the AES67 stream a receiver takes, so they're set in the design, not on site
 - **Look things up.** `probe_components` tells you a component class's properties, pins and controls, and what I/O a Core offers. Claude doesn't have to guess names.
+- **Export any design as a spec** (`export_design`), including one drawn by hand in Designer: build the spec again and you get the same design, positions, UCIs and snapshot contents included. Change the spec to rework the design.
 - **Edit a saved design** operation by operation (`edit_design`): move, rewire, set a value or a plugin's IP, add or remove blocks, without rebuilding and without losing snapshot contents.
 - **Read any design back,** including ones it didn't build: components, properties, stored values, pins, wires and UCIs, and what each snapshot sets (`read_snapshots`), straight from the file without emulation.
 - **Check signal flow statically** over the real wiring, for example "mic 1 reaches the USB send", "the laptop never reaches the far end", "the echo canceller's reference carries the far end", or "no unconnected pins".
+- **Generate the users' UCI** (`make_room_uci`): room modes, volume, mic mute, camera presets and privacy, page tabs and a logo, found in the design or named in `roles`.
 - **Picture a design without Designer** (`preview_design`): a schematic page or a UCI page drawn from the file, to check a layout without opening anything.
 - **Check a design against a control system's needs** (`check_contract`, or `check_simpl` straight from a SIMPL program), **document it** as an HTML page with every setting and what each snapshot sets (`document_design`), **compare two versions** (`compare_designs`) and **generate a test UCI** (`make_test_uci`).
 - **Test Lua outside Designer** (`lua_test`): a Text Controller's script, or a plugin's code, runs against simulated controls, blocks, timers, TCP and UDP sockets (the device's replies are steps, what the script sends is checked), HTTP (simulated replies), JSON, System and notifications, in milliseconds. A plugin runs as Designer runs it: properties, controls and layout first (layout entries without a control are reported), then its runtime code.
 - **Templates**: reusable spec fragments included with a prefix, parameters and an offset, and a library of ready-made ones (`list_templates`): conference room with a USB PC and a Dante mic that cancels echo itself, conference room with the AEC in the Core, speaker zone.
 - **Read a Crestron SIMPL program** (`check_simpl`): the blocks and controls its Q-SYS modules use are taken from the `.smw` and its `.usp` files and checked against the design.
-- **Audit a design** (`audit_design`): a mic reaching the speakers, a PC getting its own audio back, an AEC reference taken before the volume, unconnected blocks, limiter thresholds, blocks open to QRC, in the stored state and in every snapshot.
+- **Audit a design** (`audit_design`): a mic reaching the speakers, a PC getting its own audio back, an AEC reference taken before the volume, the gain structure (clipping, headroom, levels lost in the noise at each output), unconnected blocks, limiter thresholds, blocks open to QRC, in the stored state and in every snapshot.
 - **Check in Designer and test scenarios.** `designer_check` runs Designer's Check Design; `run_scenario` emulates and checks control state step by step (recall a snapshot, expect values).
 - **Emulate and test.** It opens a test copy in Designer's emulator with every block visible to QRC, then reads and sets controls to test modes, mutes and script logic.
 - **Work with a real Core, with confirmations.** `compare_with_core` checks which design a Core runs and every stored value against it (read only); `pull_core_snapshots` brings snapshots made on site (camera positions...) back into a copy of the design, putting the room back as it was; `send_to_core` runs File > Save to Core & Run and `load_from_core` File > Load from Core & Connect, each only with `confirm=True`. Logins and the choice of Core stay the user's.
@@ -148,15 +151,25 @@ Because it relies on undocumented internals, any Designer update could break it.
 | Area | Tools |
 |---|---|
 | Learn | `designer_versions`, `probe_components`, `list_templates` |
-| Build, edit and check | `build_design`, `edit_design`, `read_design`, `read_snapshots`, `list_controls`, `check_design`, `check_contract`, `check_simpl`, `audit_design`, `designer_check`, `learn_block_sizes` |
-| Document | `document_design`, `compare_designs`, `make_test_uci`, `preview_design` |
+| Build, edit and check | `build_design`, `edit_design`, `export_design`, `read_design`, `read_snapshots`, `list_controls`, `check_design`, `check_contract`, `check_simpl`, `audit_design`, `designer_check`, `learn_block_sizes` |
+| Document | `document_design`, `compare_designs`, `make_test_uci`, `make_room_uci`, `preview_design` |
 | Run | `designer_status`, `open_design`, `close_design`, `emulate_design`, `stop_emulation`, `list_dialogs`, `dialog_button`, `screenshot` |
 | Stored values and snapshots | `calibrate_values`, `record_snapshots` |
-| Real Core | `compare_with_core`, `pull_core_snapshots`, `send_to_core`, `load_from_core` |
+| Real Core | `find_cores`, `compare_with_core`, `pull_core_snapshots`, `send_to_core`, `load_from_core` |
 | Runtime (QRC) | `run_scenario`, `qrc_connect`, `save_snapshot_live`, `qrc_status`, `qrc_list_components`, `qrc_get_controls`, `qrc_set_control`, `qrc_named_controls`, `qrc_set_named_control`, `qrc_watch` |
 | Lua | `lua_check`, `lua_test`, `new_plugin` |
 
 There are three resources, `qsys://spec-format`, `qsys://lua-api` and `qsys://design-guide`, plus a `review_design` prompt.
+
+## First time with a real Core
+
+The real-Core tools were tested against Designer's emulator. On a real Core, take them in this order, on a test Core or a room that isn't in use:
+
+1. `find_cores`: the Core is heard on the network, and its name is the one in the design (`read_design` → `core.name`). If not, rename the design's Core first.
+2. `qrc_connect` with the Core's address, without `allow_changes`, then `compare_with_core` on the design it should run: read only.
+3. `send_to_core` with `confirm=True` once the user agrees: Designer asks for the Core's login if it has one; the user types it.
+4. `compare_with_core` again: the same design name and no differences.
+5. After the site work (camera positions, levels saved in snapshots), `qrc_connect` with `allow_changes=True` and `pull_core_snapshots` with an `out_path`: the snapshots come back into a copy of the design, which `compare_designs` shows next to the original.
 
 ## Limits
 
@@ -178,6 +191,8 @@ python -m venv .venv
 ```
 
 The tests that need Designer build, read and check the boardroom example with every installed version. They're skipped when Designer isn't installed, as on CI.
+
+CI (GitHub Actions) runs the tests on Python 3.11, 3.13 and 3.14, builds the .NET 8 helper and the package. Pushing a tag `vX.Y.Z` also makes a GitHub release with the package and that version's notes from CHANGELOG.md. Publishing to PyPI is ready but off: register the project on PyPI with this repository as its trusted publisher (workflow `ci.yml`, environment `pypi`), then set the repository variable `PYPI_PUBLISH` to `true`. After that, `uvx qsys-designer-mcp` installs a release in one command.
 
 To rebuild the .NET 8 helper after changing the C# (this needs the .NET 8 SDK):
 

@@ -1,5 +1,5 @@
 {
- "description": "Conference room: PC over the Core's USB speakerphone bridge (EC mode), a ceiling microphone over Dante that cancels echo itself (e.g. an array mic with its own AEC), the final speaker feed sent back to the mic as its AEC reference over Dante. Mic mute and meter, a 2 x 3 matrix (PC to the speakers, mic to the PC; mic never to the speakers), volume, EQ, limiter. Needs a Core with Flex channels for the speakers (SPK_L/SPK_R) and Software Dante.",
+ "description": "Conference room: PC over the Core's USB speakerphone bridge (EC mode), a ceiling microphone over Dante that cancels echo itself (e.g. an array mic with its own AEC), the final speaker feed sent back to the mic as its AEC reference over Dante. Mic mute and meter, a 2 x 3 matrix (PC to the speakers, mic to the PC; mic never to the speakers), volume, EQ, limiter. Needs a Core with Flex channels for the speakers (SPK_L/SPK_R) and Software Dante. The mic's Dante subscription is left for you: add \"dante_subscriptions\": {\"1\": \"<mic's Dante name>@Automix Out\"} to the MIC block (audit_design warns until it's there).",
  "params": {
   "USB_IN": "USB EC Speakerphone 1 In",
   "USB_OUT": "USB EC Speakerphone 1 Out",

@@ -47,6 +47,12 @@ Each component needs exactly one of `class` or `inventory`.
 
 A Core or device block (`inventory`) goes on the schematic once: wire everything that needs it to that one block.
 
+Network audio set in the design rather than on site:
+
+- A Software Dante RX block takes `"dante_subscriptions": {"1": "MXA920-123abc@Automix Out"}`: channel 1 subscribes to that device's channel (Q-SYS manages the subscription; the item's `ExternalControl` stays false). A Software Dante TX block names its channels with `values` `channel_N_label`, which is what other devices subscribe to.
+- An AES67 receiver block takes `"aes67_stream": "NVX-Table"`, the stream's name as its sender announces it (SAP).
+- `audit_design` warns about a Dante channel in use with no subscription and an AES67 receiver in use with no stream.
+
 ### Stored values and positions
 
 The engine applies a stored control's normalised **position** (0..1) when the design starts, not its value. The builder fills positions in from, in order of preference:
@@ -206,6 +212,10 @@ Blocks can be placed for you, along the signal flow:
 - `note` on a block puts a note under it (also with blocks you placed yourself).
 - Block sizes come from what Designer actually drew for that kind of block, learned by `learn_block_sizes` and by `record_snapshots`; otherwise they're estimated from the label and the pins. Keep labels short: Designer cuts long ones.
 
+## Exporting a design
+
+`export_design` writes any saved design back as a spec (`spec`) with its snapshot contents (`snapshots`). `build_design` on the spec gives the same design: blocks and their positions, the properties that differ from each class's defaults, stored values with their positions, wires and signal names, links by name (`signals`), notes and zones, snapshot banks and controllers, named controls, UCIs element by element. `record_snapshots` with `snapshots` then puts the snapshot contents back. Plugin blocks keep their plugin's code (`plugin_source`), so the plugin needn't be installed; Text Controllers keep their configuration as it is (`text_controller.config`) and their Lua. Core and device blocks come back as `inventory` placeables, devices with their model and settings (`set`, `usb_bridge`), and the File > Design Properties that were changed.
+
 ## Editing a design
 
 `edit_design` changes a saved file without rebuilding it, so everything else stays, snapshot contents included. Operations run in order:
@@ -228,6 +238,7 @@ Blocks can be placed for you, along the signal flow:
 | `add_uci`, `remove_uci` | `uci` (as in `ucis`) / `name` |
 | `add_named_control`, `remove_named_control` | `name`, `component`, `control` / `name` |
 | `set_global_snapshot_count` | `count` |
+| `rename_inventory` | `item` (its current name, the Core's too), `name`: the name Designer looks for on the network |
 | `set_uci_element` | `uci`, `page` (optional), `match` (`{"text": ...}` or `{"component", "control"}`, exactly one element), `set` (`x`, `y`, `w`, `h`, `text`, `font_size`) |
 
 Plugin blocks keep working in a saved design: their code is in the file, so their controls are available to `set_value` without the plugin being installed.
@@ -243,10 +254,11 @@ Other checks and documents:
 
 - `check_contract` checks what a control system or a script expects of the design: blocks by code name, Script Access (`qrc`, `script` or `both`) and the controls read or written. `list_controls` lists every control of the blocks.
 - `check_simpl` builds that contract from a Crestron SIMPL program (`.smw`) and its Q-SYS modules' `.usp` files (QscQsys library: Fader, Meter, Camera, Snapshot Controller, Generic Component Control), then checks it: each module instance's component name, and the controls it uses (for a camera, only the joins wired in the program). Other modules can be described with `modules`.
-- `audit_design` looks for what makes a room unusable: a mic reaching the speakers (feedback), a PC getting its own audio back, an AEC reference taken before the room volume, blocks with no connection, limiter thresholds above 0 dBFS, high stored gains, blocks open to QRC. Paths follow the wires and signal names through each block in its state (muted or -100 dB crosspoints, muted gains), in the stored values and, with `with_snapshots`, in every snapshot. `roles` names the mics, speakers, PC links, AEC reference and volume when the inferred ones aren't right.
+- `audit_design` looks for what makes a room unusable: a mic reaching the speakers (feedback), a PC getting its own audio back, an AEC reference taken before the room volume, blocks with no connection, limiter thresholds above 0 dBFS, high stored gains, blocks open to QRC. Paths follow the wires and signal names through each block in its state (muted or -100 dB crosspoints, muted gains), in the stored values and in every snapshot. It also checks the gain structure: a nominal -20 dBFS (or `roles.levels` per source) is carried through gains, mixer gains and limiters, summed where sources meet; clipping, little headroom (above -6 dBFS) and levels lost in the noise (below -45 dBFS) at outputs are reported, with each output's level per state in `output_levels`. `roles` names the mics, speakers, PC links, AEC reference and volume when the inferred ones aren't right.
 - `document_design` writes an HTML document of the design (inventory, blocks and settings, wires and signal names, snapshot banks and, with `with_snapshot_values`, what each snapshot sets, UCIs, notes). `compare_designs` lists what changed between two versions, including what each snapshot sets.
 - `read_snapshots` gives what every saved snapshot sets, read from the file without Designer: `{bank: {"1": {"BLOCK.control": value}}}`.
 - `make_test_uci` adds a test UCI generated from the design: snapshot buttons, meters, gains and mutes, Text Controller states.
+- `make_room_uci` adds the UCI users touch: Home (room modes from a snapshot bank, mic mute, volume), Audio (each volume) and Camera (presets from a second bank, privacy), with page tabs and an optional logo. Labels for the modes and presets go in `roles` (`{"modes": {"labels": [...]}, "camera": {"labels": [...]}}`); blocks it can't find are named there too.
 - `lua_test` runs a Text Controller's script, or a plugin (`plugin_file`), outside Designer against simulated Controls, other blocks, timers, TcpSocket / UdpSocket (steps `socket` / `udp` deliver the device's data, `expect` `sent` checks what was written), HttpClient (replies given in `http`), rapidjson / json, System, Notifications and Uci.
 
 `designer_check` runs Designer's own Check Design and returns its errors, warnings and the licences the design needs.

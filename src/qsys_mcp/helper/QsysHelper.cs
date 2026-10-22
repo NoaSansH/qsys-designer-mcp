@@ -207,12 +207,85 @@ static partial class QsysHelper
             foreach (var p in Q.Pins(comp, dir))
             {
                 var o = new JObject { { "dir", dir == "Input" ? "in" : "out" }, { "index", ++i }, { "name", Q.PinName(p) } };
+                var domain = Convert.ToString(Q.TryF(p, "Domain"));
+                if (domain != "Control" && domain != "Audio" && !string.IsNullOrEmpty(domain)) o["domain"] = domain;   // video, serial...
+                if (domain == "Control")
+                {
+                    o["control"] = true;
+                    var code = Convert.ToString(Q.TryF(p, "CodeName"));
+                    if (!string.IsNullOrEmpty(code)) o["code"] = code;
+                }
                 var signal = Convert.ToString(Q.Get(p, "Label"));
                 if (!string.IsNullOrEmpty(signal)) o["signal"] = signal;
                 arr.Add(o);
             }
         }
         return arr;
+    }
+
+    // An inventory item as a spec entry: type, name, model, the settings that differ from a new item of
+    // that type and model, and its USB bridge.
+    static JObject InventoryEntry(object item)
+    {
+        var t = item.GetType();
+        var o = new JObject { { "type", t.Name }, { "name", Convert.ToString(Q.TryGet(item, "Name")) } };
+        if (t.Name == "Core") return o;
+        object fresh = null;
+        try
+        {
+            var ctor = ModelConstructor(t);
+            if (ctor != null)
+            {
+                var modelT = ctor.GetParameters()[0].ParameterType;
+                var mp = t.GetProperties(Q.All).FirstOrDefault(p => p.PropertyType == modelT && p.GetIndexParameters().Length == 0);
+                var model = mp == null ? null : mp.GetValue(item, null);
+                if (model != null) { o["model"] = model.ToString(); fresh = ctor.Invoke(new[] { model }); }
+            }
+            if (fresh == null && t.GetConstructor(Type.EmptyTypes) != null) fresh = Activator.CreateInstance(t, true);
+        }
+        catch (Exception) { fresh = null; }
+        if (fresh != null)
+        {
+            var set = SimpleMembers(item, fresh);
+            if (set.Count > 0) o["set"] = set;
+        }
+        var bridge = Q.TryGet(item, "UsbBridge");
+        if (bridge != null) o["usb_bridge"] = BridgeSettings(bridge);
+        return o;
+    }
+
+    static readonly string[] NotSettings = { "Name", "Id", "IsSelected", "IsAttached", "IsDirty", "IsImported" };
+
+    // Public, writable, simple (number, bool, text, enum) properties of `o`; with `fresh`, only those that differ.
+    static JObject SimpleMembers(object o, object fresh)
+    {
+        var res = new JObject();
+        foreach (var p in o.GetType().GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance))
+        {
+            if (!p.CanRead || p.GetSetMethod() == null || p.GetIndexParameters().Length > 0 || NotSettings.Contains(p.Name)) continue;
+            var t = Nullable.GetUnderlyingType(p.PropertyType) ?? p.PropertyType;
+            if (!(t.IsPrimitive || t.IsEnum || t == typeof(string))) continue;
+            object a;
+            try { a = p.GetValue(o, null); } catch (Exception) { continue; }
+            if (fresh != null)
+            {
+                object b;
+                try { b = p.GetValue(fresh, null); } catch (Exception) { continue; }
+                if (Equals(a, b)) continue;
+            }
+            res[p.Name] = a == null ? JValue.CreateNull() : (t.IsEnum ? new JValue(a.ToString()) : JToken.FromObject(a));
+        }
+        return res;
+    }
+
+    // A USB bridge as configure-able settings: the slot type first (it rebuilds the slots), then the rest.
+    static JObject BridgeSettings(object bridge)
+    {
+        var all = SimpleMembers(bridge, null);
+        var o = new JObject();
+        if (all["USBSlotType"] != null) o["USBSlotType"] = all["USBSlotType"];
+        foreach (var kv in all) if (kv.Key != "USBSlotType") o[kv.Key] = kv.Value;
+        return o;
     }
 
     static JObject Props(object comp)
@@ -428,11 +501,11 @@ static partial class QsysHelper
         foreach (var idTok in ids)
         {
             var id = (string)idTok;
+            if (Q.L(Q.Get(comp, "Pins")).Any(p => Convert.ToString(Q.TryF(p, "CodeName")) == id)) continue;   // already shown
             var d = Descriptor(comp, id);
             if (d == null) throw new Exception(NameOf(comp) + " has no control " + id + " for a control pin");
             var style = Q.TryF(d, "PinStyle");
             if (style == null || style.ToString() == "None") throw new Exception(NameOf(comp) + "." + id + " cannot have a control pin");
-            if (Q.L(Q.Get(comp, "Pins")).Any(p => (string)Q.F(p, "CodeName") == id)) continue;
             var spec = Activator.CreateInstance(specT);
             var pretty = Convert.ToString(Q.TryF(d, "PrettyName"));
             Q.Set(spec, "CodeName", id);
@@ -628,11 +701,12 @@ static partial class QsysHelper
         else
         {
             var cls = cs["plugin"] != null || cs["plugin_file"] != null ? PluginClass(cs["plugin"], (string)cs["plugin_file"]) : (string)cs["class"];
+            if (cs["plugin_source"] != null) Q.RegisterPlugin(cls, (string)cs["plugin_source"]);   // a plugin as saved in a design
             c = Q.NewComponent(cls);
             var props = cs["properties"] as JObject;
             if (props != null) foreach (var kv in props) Q.SetProp(c, kv.Key, Scalar(kv.Value));
             var tc = cs["text_controller"] as JObject;
-            if (tc != null) Q.SetProp(c, "config", TextControllerConfig((JArray)tc["controls"]));
+            if (tc != null) Q.SetProp(c, "config", tc["config"] != null ? (string)tc["config"] : TextControllerConfig((JArray)tc["controls"]));
             Q.Refresh(c);
         }
         var pageName = (string)cs["page"] ?? ctx.PageNames[0];
@@ -1149,7 +1223,16 @@ static partial class QsysHelper
             usb.Add(new JObject { { "name", Convert.ToString(Q.Get(slot, "Name")) }, { "type", Convert.ToString(Q.Get(slot, "UsbType")) },
                 { "inputs", Convert.ToString(Q.Get(slot, "InputCount")) }, { "outputs", Convert.ToString(Q.Get(slot, "OutputCount")) } });
         res["usb_slots"] = usb;
-        res["inventory"] = new JArray(Q.L(Q.Get(doc, "Inventory")).Select(i => new JObject { { "type", i.GetType().Name }, { "name", Convert.ToString(Q.TryGet(i, "Name")) } }));
+        var coreBridge = Q.TryGet(core, "UsbBridge");
+        if (coreBridge != null) ((JObject)res["core"])["usb_bridge"] = BridgeSettings(coreBridge);
+        res["inventory"] = new JArray(Q.L(Q.Get(doc, "Inventory")).Select(i => InventoryEntry(i)));
+        var dprops = Q.TryGet(doc, "Properties");
+        if (dprops != null)
+        {
+            object freshProps = null;
+            try { freshProps = Activator.CreateInstance(dprops.GetType(), true); } catch (Exception) { }
+            res["design_properties"] = SimpleMembers(dprops, freshProps);
+        }
 
         var wires = new List<object>(); var comps = new List<object>(); var pageOf = new Dictionary<object, string>();
         var pagesOut = new JArray();
@@ -1173,12 +1256,28 @@ static partial class QsysHelper
                 foreach (var p in Q.Pins(c, dir)) pinRef[p] = NameOf(c) + (dir == "Input" ? ".in." : ".out.") + (++i);
             }
         Func<object, string> Ref = p => { string r; return pinRef.TryGetValue(p, out r) ? r : "?." + Q.PinName(p); };
+        // which inventory item and placeable each Core or device block comes from
+        var origin = new Dictionary<object, JObject>();
+        foreach (var item in new[] { core }.Concat(Q.L(Q.Get(doc, "Inventory"))).Distinct())
+            foreach (var pi in Q.L(Q.TryGet(item, "PlaceableItems")))
+            {
+                try
+                {
+                    foreach (var placed in Q.L(Q.TryGet(pi, "PlacedComponents")))
+                        if (comps.Contains(placed) && !origin.ContainsKey(placed))
+                            origin[placed] = new JObject { { "item", Convert.ToString(Q.Get(item, "Name")) }, { "placeable", Convert.ToString(Q.Get(pi, "Name")) },
+                                { "core", ReferenceEquals(item, core) } };
+                }
+                catch (Exception) { }
+            }
         var compsOut = new JArray();
         foreach (var c in comps)
         {
             var o = new JObject { { "name", NameOf(c) }, { "class", (string)Q.Get(c, "ClassName") }, { "label", Convert.ToString(Q.Get(c, "Label")) },
                 { "user_label", Convert.ToString(Q.TryGet(c, "UserLabel")) },
                 { "page", pageOf[c] }, { "script_access", Q.Get(c, "ScriptAccess").ToString() } };
+            JObject from;
+            if (origin.TryGetValue(c, out from)) o["inventory"] = from;
             var uid = Q.TryGet(c, "Id");   // the engine's id of the block, used in snapshot files
             if (uid != null) o["uid"] = Convert.ToString(Q.TryGet(uid, "RawString") ?? uid);
             var pos = (System.Windows.Point)Q.Get(c, "Position");
@@ -1255,7 +1354,30 @@ static partial class QsysHelper
                         eo["component"] = byId.TryGetValue(Convert.ToString(Q.Get(el, "Id")), out comp) ? NameOf(comp) : null;
                         eo["control"] = Convert.ToString(Q.Get(el, "Name"));
                         eo["style"] = Convert.ToString(Q.TryGet(el, "VisualStyle"));
-                        if (Convert.ToString(Q.TryGet(el, "ButtonVisualStyle")) == "Image") eo["images"] = true;
+                        if (Convert.ToString(Q.TryGet(el, "ButtonVisualStyle")) == "Image")
+                        {
+                            eo["images"] = true;
+                            foreach (var st in new[] { "On", "Off", "PressedOn", "PressedOff" })
+                            {
+                                var bytes = Q.TryGet(el, st + "ImageData") as byte[];
+                                if (bytes == null || bytes.Length == 0) continue;
+                                var key = "image_" + (st == "PressedOn" ? "pressed_on" : st == "PressedOff" ? "pressed_off" : st.ToLower());
+                                eo[key] = new JObject { { "data", Convert.ToBase64String(bytes) },
+                                    { "format", Convert.ToString(Q.TryGet(el, st + "ImageType")) == "Svg" ? "svg" : "png" } };
+                            }
+                        }
+                        eo["color"] = Convert.ToString(Q.TryGet(el, "Color"));
+                        if (Q.TryGet(el, "AutoColorText") is bool && !(bool)Q.Get(el, "AutoColorText")) eo["text_color"] = Convert.ToString(Q.TryGet(el, "TextColor"));
+                        if (Q.TryGet(el, "IsOffColorOverridden") is bool && (bool)Q.Get(el, "IsOffColorOverridden")) eo["off_color"] = Convert.ToString(Q.TryGet(el, "OffColor"));
+                        var fs = Q.TryGet(el, "FontSize"); if (fs != null) eo["font_size"] = Convert.ToDouble(fs);
+                        var cr = Q.TryGet(el, "CornerRadius"); if (cr != null) eo["corner_radius"] = Convert.ToDouble(cr);
+                        var tb = Q.TryGet(el, "IsTextboxVisible"); if (tb is bool) eo["show_textbox"] = (bool)tb;
+                    }
+                    else if (el.GetType().Name == "TextBlock")
+                    {
+                        eo["color"] = Convert.ToString(Q.TryGet(el, "TextColor"));
+                        var fs = Q.TryGet(el, "FontSize"); if (fs != null) eo["font_size"] = Convert.ToDouble(fs);
+                        eo["align"] = Convert.ToString(Q.TryGet(el, "HorizontalTextAlignment"));
                     }
                     else if (el.GetType().Name == "GraphicImage")
                     {
@@ -1282,7 +1404,7 @@ static partial class QsysHelper
                     else QUci.ReadGraphic(el, eo);
                     els.Add(eo);
                 }
-                pagesJ.Add(new JObject { { "name", Convert.ToString(Q.Get(pg, "Title")) }, { "elements", els } });
+                pagesJ.Add(new JObject { { "name", Convert.ToString(Q.Get(pg, "Title")) }, { "color", Convert.ToString(Q.TryGet(pg, "Color")) }, { "elements", els } });
             }
             var uo = new JObject { { "name", Convert.ToString(Q.Get(panel, "Title")) } };
             QUci.ReadSize(panel, uo);
