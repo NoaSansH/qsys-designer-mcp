@@ -575,17 +575,40 @@ async def pull_core_snapshots(path: str, banks: list[str] | None = None, numbers
     return out
 
 
+@tool(LIVE_READ)
+def find_cores(seconds: float = 5.0) -> dict:
+    """The Q-SYS Cores (and other Q-SYS devices) announcing themselves on this PC's networks during
+    `seconds`: name, model, addresses, primary or not. Only listens. A design reaches the Core whose name
+    is the design's Core name, so this is the check before send_to_core. Windows may ask once whether
+    Python may receive on the network."""
+    from qsys_mcp import discovery
+    devices = discovery.listen(seconds)
+    return {"cores": discovery.cores(devices), "other_devices": [d for d in devices if d not in discovery.cores(devices)],
+            "listened_s": seconds}
+
+
 @tool(APP_SAFE)
-def send_to_core(path: str, confirm: bool = False, discard_changes: bool = False, wait: float = 60) -> dict:
+def send_to_core(path: str, confirm: bool = False, discard_changes: bool = False, wait: float = 60,
+                 check_network: bool = True) -> dict:
     """Open a design in Designer and run File > Save to Core & Run: the Core named in the design gets
     it and runs it, replacing what it runs. Only with confirm=True, which the user must have asked for.
     Designer finds the Core by the design's Core name; a login, a choice of Core or a confirmation it
     asks for is returned (list_dialogs / dialog_button), never answered here, and credentials are the
-    user's to type. If no Core answers within `wait` seconds the request is cancelled and that is said."""
+    user's to type. If no Core answers within `wait` seconds the request is cancelled and that is said.
+    check_network first listens for Cores (find_cores) and stops if none has the design's Core name."""
     if not confirm:
         raise ValueError("Sending a design replaces what the Core runs: ask the user, then call again with confirm=True.")
+    core_name = designs.read(path).get("core", {}).get("name")
+    heard = None
+    if check_network:              # a Core named otherwise would keep Designer searching: say it now
+        from qsys_mcp import discovery
+        heard = discovery.cores(discovery.listen(4.0))
+        if heard and core_name not in [d["name"] for d in heard]:
+            raise ValueError(f"The design's Core is named {core_name!r}, but the Cores on the network are "
+                             f"{[d['name'] for d in heard]}. Rename the design's Core (edit_design / Design Properties) "
+                             "to the one it should run on, then send again.")
     opened = designer.open_design(path, discard_changes)
-    return {"opened": opened, "core_name": designs.read(path).get("core", {}).get("name"), **designer.send_to_core(wait)}
+    return {"opened": opened, "core_name": core_name, "cores_heard": heard, **designer.send_to_core(wait)}
 
 
 @tool(APP_SAFE)

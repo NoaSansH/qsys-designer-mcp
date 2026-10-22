@@ -154,11 +154,21 @@ Because it relies on undocumented internals, any Designer update could break it.
 | Document | `document_design`, `compare_designs`, `make_test_uci`, `preview_design` |
 | Run | `designer_status`, `open_design`, `close_design`, `emulate_design`, `stop_emulation`, `list_dialogs`, `dialog_button`, `screenshot` |
 | Stored values and snapshots | `calibrate_values`, `record_snapshots` |
-| Real Core | `compare_with_core`, `pull_core_snapshots`, `send_to_core`, `load_from_core` |
+| Real Core | `find_cores`, `compare_with_core`, `pull_core_snapshots`, `send_to_core`, `load_from_core` |
 | Runtime (QRC) | `run_scenario`, `qrc_connect`, `save_snapshot_live`, `qrc_status`, `qrc_list_components`, `qrc_get_controls`, `qrc_set_control`, `qrc_named_controls`, `qrc_set_named_control`, `qrc_watch` |
 | Lua | `lua_check`, `lua_test`, `new_plugin` |
 
 There are three resources, `qsys://spec-format`, `qsys://lua-api` and `qsys://design-guide`, plus a `review_design` prompt.
+
+## First time with a real Core
+
+The real-Core tools were tested against Designer's emulator. On a real Core, take them in this order, on a test Core or a room that isn't in use:
+
+1. `find_cores`: the Core is heard on the network, and its name is the one in the design (`read_design` → `core.name`). If not, rename the design's Core first.
+2. `qrc_connect` with the Core's address, without `allow_changes`, then `compare_with_core` on the design it should run: read only.
+3. `send_to_core` with `confirm=True` once the user agrees: Designer asks for the Core's login if it has one; the user types it.
+4. `compare_with_core` again: the same design name and no differences.
+5. After the site work (camera positions, levels saved in snapshots), `qrc_connect` with `allow_changes=True` and `pull_core_snapshots` with an `out_path`: the snapshots come back into a copy of the design, which `compare_designs` shows next to the original.
 
 ## Limits
 
