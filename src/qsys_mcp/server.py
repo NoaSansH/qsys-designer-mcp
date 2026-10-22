@@ -290,6 +290,25 @@ def make_test_uci(path: str, name: str = "Test", out_path: str | None = None, wi
             "elements": sum(len(p["elements"]) for p in uci["pages"])}
 
 
+@tool(WRITES_FILE)
+def make_room_uci(path: str, name: str = "Salle", out_path: str | None = None, roles: dict | None = None,
+                  logo: str | None = None, lang: str = "fr", width: int = 1280, height: int = 800) -> dict:
+    """Add the UCI a room's users touch, generated from the design: Home with the room modes (a snapshot
+    bank's Load buttons), the mic mute and the room volume; Audio with each volume when there are several;
+    Camera with the camera presets (a second bank) and privacy; page tabs when there are several pages; an
+    optional logo (image file). What is what is found in the design, or given in roles:
+    {"modes": {"controller": "...", "labels": [...]}, "volumes": [...], "mic_mute": "...",
+     "camera": {"controller": "...", "labels": [...]}, "privacy": {"component": "...", "control": "..."}}.
+    lang fr or en. Writes `path` in place unless out_path (a new file); a UCI of that name is replaced."""
+    from qsys_mcp import roompanel
+    design = designs.read(path)
+    uci = roompanel.build(design, name, width, height, roles, os.path.abspath(logo) if logo else None, lang)
+    ops = ([{"op": "remove_uci", "name": name}] if any(u["name"] == name for u in design.get("ucis", [])) else []) +           [{"op": "add_uci", "uci": uci}]
+    res = designs.edit(path, ops, out_path)
+    return {"path": res["path"], "uci": name, "pages": [p["name"] for p in uci["pages"]],
+            "elements": sum(len(p["elements"]) for p in uci["pages"]), "roles": roompanel.roles(design, roles)}
+
+
 @tool(READ_ONLY)
 def read_design(path: str, components: list[str] | None = None, sections: list[str] | None = None) -> dict:
     """Read a saved .qsys back: core, USB, inventory, pages, every component (class, name, Script Access,

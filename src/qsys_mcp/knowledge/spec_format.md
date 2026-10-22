@@ -258,6 +258,7 @@ Other checks and documents:
 - `document_design` writes an HTML document of the design (inventory, blocks and settings, wires and signal names, snapshot banks and, with `with_snapshot_values`, what each snapshot sets, UCIs, notes). `compare_designs` lists what changed between two versions, including what each snapshot sets.
 - `read_snapshots` gives what every saved snapshot sets, read from the file without Designer: `{bank: {"1": {"BLOCK.control": value}}}`.
 - `make_test_uci` adds a test UCI generated from the design: snapshot buttons, meters, gains and mutes, Text Controller states.
+- `make_room_uci` adds the UCI users touch: Home (room modes from a snapshot bank, mic mute, volume), Audio (each volume) and Camera (presets from a second bank, privacy), with page tabs and an optional logo. Labels for the modes and presets go in `roles` (`{"modes": {"labels": [...]}, "camera": {"labels": [...]}}`); blocks it can't find are named there too.
 - `lua_test` runs a Text Controller's script, or a plugin (`plugin_file`), outside Designer against simulated Controls, other blocks, timers, TcpSocket / UdpSocket (steps `socket` / `udp` deliver the device's data, `expect` `sent` checks what was written), HttpClient (replies given in `http`), rapidjson / json, System, Notifications and Uci.
 
 `designer_check` runs Designer's own Check Design and returns its errors, warnings and the licences the design needs.

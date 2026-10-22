@@ -146,6 +146,19 @@ def validate(spec: dict, base_dir: str | Path | None = None) -> tuple[dict, list
     return spec, problems
 
 
+def _uci_media(u: dict, base_dir) -> list[str]:
+    """A UCI's image files read into the spec (images and buttons drawn with images)."""
+    problems = []
+    for p in u.get("pages", []):
+        for j, e in enumerate(p.get("elements", [])):
+            where = f"UCI {u.get('name')}/{p.get('name')} element {j}"
+            if e.get("type") == "image":
+                problems += _load_image(e, None, where, base_dir)
+            for k in [k for k in e if k.startswith("image_")]:
+                problems += _load_image(e, k, where, base_dir)
+    return problems
+
+
 IMAGE_TYPES = {".png": "png", ".jpg": "jpg", ".jpeg": "jpg", ".gif": "gif", ".bmp": "bmp", ".svg": "svg"}
 UCI_NAVIGATION = ("None", "Left", "Right", "Top", "Bottom")
 
@@ -300,6 +313,8 @@ def edit(path: str, ops: list[dict], out_path: str | None = None, base_dir: str 
             name = (op.get("component") or {}).get("name")
             if not name or not NAME_RE.match(name):
                 problems.append(f"ops[{i}]: the new component needs a valid name, not {name!r}")
+        elif kind == "add_uci" and isinstance(op.get("uci"), dict):
+            problems += _uci_media(op["uci"], base_dir)
         elif kind == "set_lua" and "lua" in op:
             from qsys_mcp import lua
             chk = lua.check_syntax(op["lua"])

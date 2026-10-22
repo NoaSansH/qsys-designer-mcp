@@ -27,6 +27,7 @@ An MCP server that lets Claude, or any other MCP client, build Q-SYS designs. Yo
 - **Edit a saved design** operation by operation (`edit_design`): move, rewire, set a value or a plugin's IP, add or remove blocks, without rebuilding and without losing snapshot contents.
 - **Read any design back,** including ones it didn't build: components, properties, stored values, pins, wires and UCIs, and what each snapshot sets (`read_snapshots`), straight from the file without emulation.
 - **Check signal flow statically** over the real wiring, for example "mic 1 reaches the USB send", "the laptop never reaches the far end", "the echo canceller's reference carries the far end", or "no unconnected pins".
+- **Generate the users' UCI** (`make_room_uci`): room modes, volume, mic mute, camera presets and privacy, page tabs and a logo, found in the design or named in `roles`.
 - **Picture a design without Designer** (`preview_design`): a schematic page or a UCI page drawn from the file, to check a layout without opening anything.
 - **Check a design against a control system's needs** (`check_contract`, or `check_simpl` straight from a SIMPL program), **document it** as an HTML page with every setting and what each snapshot sets (`document_design`), **compare two versions** (`compare_designs`) and **generate a test UCI** (`make_test_uci`).
 - **Test Lua outside Designer** (`lua_test`): a Text Controller's script, or a plugin's code, runs against simulated controls, blocks, timers, TCP and UDP sockets (the device's replies are steps, what the script sends is checked), HTTP (simulated replies), JSON, System and notifications, in milliseconds. A plugin runs as Designer runs it: properties, controls and layout first (layout entries without a control are reported), then its runtime code.
@@ -151,7 +152,7 @@ Because it relies on undocumented internals, any Designer update could break it.
 |---|---|
 | Learn | `designer_versions`, `probe_components`, `list_templates` |
 | Build, edit and check | `build_design`, `edit_design`, `export_design`, `read_design`, `read_snapshots`, `list_controls`, `check_design`, `check_contract`, `check_simpl`, `audit_design`, `designer_check`, `learn_block_sizes` |
-| Document | `document_design`, `compare_designs`, `make_test_uci`, `preview_design` |
+| Document | `document_design`, `compare_designs`, `make_test_uci`, `make_room_uci`, `preview_design` |
 | Run | `designer_status`, `open_design`, `close_design`, `emulate_design`, `stop_emulation`, `list_dialogs`, `dialog_button`, `screenshot` |
 | Stored values and snapshots | `calibrate_values`, `record_snapshots` |
 | Real Core | `find_cores`, `compare_with_core`, `pull_core_snapshots`, `send_to_core`, `load_from_core` |
