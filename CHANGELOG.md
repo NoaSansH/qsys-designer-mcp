@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.1 (2026-10-22)
+
+- CI can be started by hand from the Actions tab (Run workflow). First release published by the CI with its package.
+
 ## 0.7.0 (2026-10-22)
 
 - `export_design`: any saved design, including one made by hand in Designer, written back as a spec that builds the same design (positions, properties, values, wires and signal names, notes, banks, named controls, UCIs element by element), with its snapshot contents for `record_snapshots`. `read_design` now tells which device and placeable each Core or device block comes from, devices' models and settings, USB bridges, changed Design Properties, control pins, non-audio pins, and every UCI element's look. `build_design` takes a plugin's saved code (`plugin_source`) and a Text Controller's raw configuration.
