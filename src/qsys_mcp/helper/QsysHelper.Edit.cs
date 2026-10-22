@@ -84,6 +84,42 @@ static partial class QsysHelper
         return new JObject { { "type", t.FullName }, { "base", t.BaseType == null ? null : t.BaseType.FullName }, { "members", res } };
     }
 
+    // {"op": "set_uci_element", "uci", "page"?, "match": {"text": "..."} | {"component", "control"}, "set": {x, y, w, h, text}}
+    // One element of a UCI moved, resized or relabelled; the match must find exactly one.
+    static JObject SetUciElement(Ctx ctx, JObject op)
+    {
+        var panel = Q.L(Q.Get(ctx.Doc, "WebPanels")).FirstOrDefault(pn => Convert.ToString(Q.Get(pn, "Title")) == (string)op["uci"]);
+        if (panel == null) throw new Exception("no UCI named " + op["uci"]);
+        var match = (JObject)op["match"] ?? new JObject();
+        var byId = ctx.Comps.Values.ToDictionary(c => Convert.ToString(Q.Get(c, "Id")), c => c);
+        var hits = new List<object>();
+        foreach (var pg in Q.L(Q.Get(panel, "Pages")))
+        {
+            if (op["page"] != null && Convert.ToString(Q.Get(pg, "Title")) != (string)op["page"]) continue;
+            foreach (var el in Q.L(Q.Get(pg, "AllChildren")))
+            {
+                if (match["text"] != null && Convert.ToString(Q.TryGet(el, "Label")) == (string)match["text"]) hits.Add(el);
+                else if (match["component"] != null && el.GetType().Name == "ControlStyle")
+                {
+                    object comp;
+                    if (byId.TryGetValue(Convert.ToString(Q.Get(el, "Id")), out comp) && NameOf(comp) == (string)match["component"]
+                        && Convert.ToString(Q.Get(el, "Name")) == (string)match["control"]) hits.Add(el);
+                }
+            }
+        }
+        if (hits.Count != 1)
+            throw new Exception("set_uci_element: " + hits.Count + " elements match " + match.ToString(Newtonsoft.Json.Formatting.None) + " (give the page, or a closer match)");
+        var e = hits[0];
+        var set = (JObject)op["set"] ?? new JObject();
+        var pos = (System.Windows.Point)Q.Get(e, "Position");
+        var size = (System.Windows.Size)Q.Get(e, "Size");
+        Q.Set(e, "Position", new System.Windows.Point((double?)set["x"] ?? pos.X, (double?)set["y"] ?? pos.Y));
+        Q.Set(e, "Size", new System.Windows.Size((double?)set["w"] ?? size.Width, (double?)set["h"] ?? size.Height));
+        if (set["text"] != null) Q.Set(e, "Label", (string)set["text"]);
+        if (set["font_size"] != null) Q.Set(e, "FontSize", (double)set["font_size"]);
+        return new JObject { { "element", e.GetType().Name }, { "was", new JObject { { "x", pos.X }, { "y", pos.Y }, { "w", size.Width }, { "h", size.Height } } } };
+    }
+
     static object EnsureManager()
     {
         var mgrField = Q.T("QSC.QSys.App").GetField("Manager", Q.All);
@@ -308,11 +344,13 @@ static partial class QsysHelper
             }
             case "add_snapshot_bank":
                 return BuildBank(ctx.Doc, (JObject)op["bank"], ctx.Comps, ctx.CompPage, ctx.Pages, ctx.PageNames[0]);
+            case "set_uci_element":
+                return SetUciElement(ctx, op);
             default:
                 throw new Exception("unknown op; ops are set_value, set_values, set_property, move, set_label, set_access, rename, set_lua, " +
                     "add_control_pins, add_inventory, set_usb_bridge, set_design_properties, add_component, remove_component, add_wire, " +
                     "remove_wire, add_signal, rename_signal, remove_signal, add_graphic, set_graphic, remove_graphic, add_snapshot_bank, " +
-                    "add_uci, remove_uci, add_named_control, remove_named_control, set_global_snapshot_count");
+                    "add_uci, remove_uci, set_uci_element, add_named_control, remove_named_control, set_global_snapshot_count");
         }
     }
 

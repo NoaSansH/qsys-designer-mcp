@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.1 (2026-10-22)
+
+- `edit_design` op `set_uci_element`: one element of a saved UCI moved, resized or relabelled, found by its text or its control (exactly one must match), without rebuilding the UCI.
+- `screenshot`: the picture drawn by Windows is copied before its buffer is freed (parts of a capture could come out black).
+
 ## 0.6.0 (2026-10-22)
 
 - `read_snapshots`: what every snapshot sets, read straight from the design file (the engine's snapshot files are decoded), without Designer or emulation. `audit_design`, `document_design` and `compare_designs` use it; `compare_designs` compares snapshot values and ignores the ids Designer makes up for each block. `read_design` gives each block's GUID.
