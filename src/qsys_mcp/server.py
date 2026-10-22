@@ -605,7 +605,7 @@ def send_to_core(path: str, confirm: bool = False, discard_changes: bool = False
         heard = discovery.cores(discovery.listen(4.0))
         if heard and core_name not in [d["name"] for d in heard]:
             raise ValueError(f"The design's Core is named {core_name!r}, but the Cores on the network are "
-                             f"{[d['name'] for d in heard]}. Rename the design's Core (edit_design / Design Properties) "
+                             f"{[d['name'] for d in heard]}. Rename the design's Core (edit_design op rename_inventory) "
                              "to the one it should run on, then send again.")
     opened = designer.open_design(path, discard_changes)
     return {"opened": opened, "core_name": core_name, "cores_heard": heard, **designer.send_to_core(wait)}

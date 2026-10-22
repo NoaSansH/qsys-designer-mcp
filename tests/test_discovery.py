@@ -1,7 +1,4 @@
-"""Parsing Q-SYS device announcements, and listening on a socket that gets one."""
-import socket
-import threading
-
+"""Parsing Q-SYS device announcements."""
 from qsys_mcp import discovery
 
 ANNOUNCE = (b"<QDP><device><name>Room-Core</name><type>lcqln</type><part_number>Core 8 Flex</part_number>"

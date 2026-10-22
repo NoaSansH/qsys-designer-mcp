@@ -214,6 +214,16 @@ static partial class QsysHelper
             case "add_control_pins":
                 AddControlPins(Comp(ctx, op), op["controls"] as JArray);
                 return PinInfo(Comp(ctx, op));
+            case "rename_inventory":
+            {
+                // {"op": "rename_inventory", "item": "old name" (the Core's too), "name": "new name"}
+                object item;
+                if (!ctx.Inventory.TryGetValue((string)op["item"] ?? "", out item))
+                    throw new Exception("no inventory item '" + op["item"] + "'; items: " + string.Join(", ", ctx.Inventory.Keys));
+                Q.Set(item, "Name", (string)op["name"]);
+                var actual = Convert.ToString(Q.Get(item, "Name"));
+                return actual == (string)op["name"] ? "ok" : "renamed '" + actual + "' (Designer's hostname rules)";
+            }
             case "add_inventory":
                 return Convert.ToString(Q.Get(AddInventoryItem(ctx, (JObject)op["item"]), "Name"));
             case "set_usb_bridge":
@@ -350,7 +360,8 @@ static partial class QsysHelper
                 throw new Exception("unknown op; ops are set_value, set_values, set_property, move, set_label, set_access, rename, set_lua, " +
                     "add_control_pins, add_inventory, set_usb_bridge, set_design_properties, add_component, remove_component, add_wire, " +
                     "remove_wire, add_signal, rename_signal, remove_signal, add_graphic, set_graphic, remove_graphic, add_snapshot_bank, " +
-                    "add_uci, remove_uci, set_uci_element, add_named_control, remove_named_control, set_global_snapshot_count");
+                    "add_uci, remove_uci, set_uci_element, add_named_control, remove_named_control, set_global_snapshot_count, " +
+                    "rename_inventory");
         }
     }
 

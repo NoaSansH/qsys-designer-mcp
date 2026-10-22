@@ -277,7 +277,7 @@ def build(spec: dict, path: str, overwrite: bool = False, designer_version: str 
 EDIT_OPS = {"set_value", "set_values", "set_property", "move", "set_label", "set_access", "rename", "set_lua", "add_control_pins",
             "add_inventory", "set_usb_bridge", "set_design_properties", "add_component", "remove_component", "add_wire",
             "remove_wire", "add_signal", "rename_signal", "remove_signal", "add_graphic", "set_graphic", "remove_graphic",
-            "add_snapshot_bank", "add_uci", "remove_uci", "set_uci_element", "add_named_control", "remove_named_control",
+            "add_snapshot_bank", "add_uci", "remove_uci", "set_uci_element", "rename_inventory", "add_named_control", "remove_named_control",
             "set_global_snapshot_count"}
 
 

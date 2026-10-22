@@ -238,6 +238,7 @@ Blocks can be placed for you, along the signal flow:
 | `add_uci`, `remove_uci` | `uci` (as in `ucis`) / `name` |
 | `add_named_control`, `remove_named_control` | `name`, `component`, `control` / `name` |
 | `set_global_snapshot_count` | `count` |
+| `rename_inventory` | `item` (its current name, the Core's too), `name`: the name Designer looks for on the network |
 | `set_uci_element` | `uci`, `page` (optional), `match` (`{"text": ...}` or `{"component", "control"}`, exactly one element), `set` (`x`, `y`, `w`, `h`, `text`, `font_size`) |
 
 Plugin blocks keep working in a saved design: their code is in the file, so their controls are available to `set_value` without the plugin being installed.
