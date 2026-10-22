@@ -192,6 +192,8 @@ python -m venv .venv
 
 The tests that need Designer build, read and check the boardroom example with every installed version. They're skipped when Designer isn't installed, as on CI.
 
+CI (GitHub Actions) runs the tests on Python 3.11, 3.13 and 3.14, builds the .NET 8 helper and the package. Pushing a tag `vX.Y.Z` also makes a GitHub release with the package and that version's notes from CHANGELOG.md. Publishing to PyPI is ready but off: register the project on PyPI with this repository as its trusted publisher (workflow `ci.yml`, environment `pypi`), then set the repository variable `PYPI_PUBLISH` to `true`. After that, `uvx qsys-designer-mcp` installs a release in one command.
+
 To rebuild the .NET 8 helper after changing the C# (this needs the .NET 8 SDK):
 
 ```bash
