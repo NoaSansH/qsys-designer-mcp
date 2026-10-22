@@ -55,7 +55,8 @@ def test_template_builds_checks_and_audits(name, inst, tmp_path):
     loose_ok = [c["name"] for c in d["components"] if c["name"] in IO or c["class"] == "router_with_output"]
     assert all(r["pass"] for r in designs.check(d, allow_unconnected=loose_ok)["results"])
     a = audit.audit(d)
-    assert a["errors"] == 0 and a["warnings"] == 0, a["findings"]
+    expected = {"Dante channel in use with no subscription"}   # the mic's Dante name is the user's to give
+    assert a["errors"] == 0 and not [f for f in a["findings"] if f["severity"] == "warning" and f["rule"] not in expected], a["findings"]
 
 
 def test_divisible_room_wall_script_follows_the_prefix():
