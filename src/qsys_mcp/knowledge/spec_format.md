@@ -47,6 +47,12 @@ Each component needs exactly one of `class` or `inventory`.
 
 A Core or device block (`inventory`) goes on the schematic once: wire everything that needs it to that one block.
 
+Network audio set in the design rather than on site:
+
+- A Software Dante RX block takes `"dante_subscriptions": {"1": "MXA920-123abc@Automix Out"}`: channel 1 subscribes to that device's channel (Q-SYS manages the subscription; the item's `ExternalControl` stays false). A Software Dante TX block names its channels with `values` `channel_N_label`, which is what other devices subscribe to.
+- An AES67 receiver block takes `"aes67_stream": "NVX-Table"`, the stream's name as its sender announces it (SAP).
+- `audit_design` warns about a Dante channel in use with no subscription and an AES67 receiver in use with no stream.
+
 ### Stored values and positions
 
 The engine applies a stored control's normalised **position** (0..1) when the design starts, not its value. The builder fills positions in from, in order of preference:

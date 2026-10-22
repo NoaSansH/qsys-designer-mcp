@@ -21,6 +21,7 @@ An MCP server that lets Claude, or any other MCP client, build Q-SYS designs. Yo
   - snapshot banks with their Snapshot Controllers, and their contents (`record_snapshots`)
   - multi-page schematics, and multi-page UCIs with their size, frames and headers
   - automatic layout along the signal flow, with zones and notes
+  - Dante subscriptions of Software Dante receivers and the AES67 stream a receiver takes, so they're set in the design, not on site
 - **Look things up.** `probe_components` tells you a component class's properties, pins and controls, and what I/O a Core offers. Claude doesn't have to guess names.
 - **Export any design as a spec** (`export_design`), including one drawn by hand in Designer: build the spec again and you get the same design, positions, UCIs and snapshot contents included. Change the spec to rework the design.
 - **Edit a saved design** operation by operation (`edit_design`): move, rewire, set a value or a plugin's IP, add or remove blocks, without rebuilding and without losing snapshot contents.

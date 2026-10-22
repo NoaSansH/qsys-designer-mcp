@@ -41,6 +41,7 @@ def validate(spec: dict, base_dir: str | Path | None = None) -> tuple[dict, list
     for i, c in enumerate(spec.get("components", [])):
         where = f"components[{i}]"
         name = c.get("name")
+        problems += _network_audio(c, where)
         if not name or not NAME_RE.match(name):
             problems.append(f"{where}: name {name!r} must start with a letter and use letters, digits, _ or -")
         elif name in names:
@@ -175,6 +176,30 @@ def _load_image(e: dict, key: str | None, where: str, base_dir) -> list[str]:
     else:
         e[key] = {"data": data, "format": fmt}
     return []
+
+
+def _network_audio(c: dict, where: str) -> list[str]:
+    """dante_subscriptions {"1": "Device@Channel"} and aes67_stream "name" become the block's stored values."""
+    problems = []
+    subs = c.pop("dante_subscriptions", None)
+    if subs is not None:
+        if not isinstance(subs, dict):
+            return [f"{where}: dante_subscriptions must be {{\"channel\": \"Device@Channel\"}}"]
+        values = c.setdefault("values", {})
+        for ch, target in subs.items():
+            if not str(ch).isdigit() or not isinstance(target, str) or target.count("@") != 1 or target.startswith("@"):
+                problems.append(f"{where}: dante_subscriptions {ch!r}: {target!r} should be \"Device@Channel\" for a channel number")
+                continue
+            device, channel = target.split("@")
+            values[f"channel_{int(ch)}_subscription_device"] = device
+            values[f"channel_{int(ch)}_subscription_channel"] = channel
+    stream = c.pop("aes67_stream", None)
+    if stream is not None:
+        if not isinstance(stream, str) or not stream:
+            problems.append(f"{where}: aes67_stream must be the stream's name as announced (SAP)")
+        else:
+            c.setdefault("values", {})["stream_name"] = stream
+    return problems
 
 
 def _is_int(v) -> bool:

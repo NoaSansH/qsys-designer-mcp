@@ -178,6 +178,34 @@ class Graph:
                 if (direction is None or p["dir"] == direction) and not p.get("control")]
 
 
+def _text(c: dict, control: str) -> str:
+    v = c.get("values", {}).get(control)
+    if isinstance(v, dict):
+        v = v.get("string", v.get("value"))
+    return "" if v is None else str(v)
+
+
+def network_audio(design: dict, wired: set) -> list[tuple[str, str]]:
+    """Software Dante channels in use with no subscription, AES67 receivers with no stream."""
+    kinds = {i["name"]: i["type"] for i in design.get("inventory", [])}
+    out = []
+    for c in design["components"]:
+        origin = (c.get("inventory") or {}).get("item")
+        kind = kinds.get(origin, "")
+        if kind == "SoftDanteInput" and str(c.get("properties", {}).get("external_config", "False")) != "True":
+            for p in c["pins"]:
+                key = f"{c['name']}.out.{p['index']}"
+                n, _ = _num(p["name"])
+                if p["dir"] == "out" and not p.get("control") and key in wired and n is not None \
+                        and not _text(c, f"channel_{n}_subscription_device"):
+                    out.append(("Dante channel in use with no subscription",
+                                f"{c['name']} channel {n}: give it its transmitter (dante_subscriptions {{\"{n}\": \"Device@Channel\"}})"))
+        elif kind == "Aes67Receiver" and any(f"{c['name']}.out.{p['index']}" in wired for p in c["pins"]):
+            if not _text(c, "stream_name") and not _text(c, "user_address"):
+                out.append(("AES67 receiver with no stream", f"{c['name']}: give it the stream's name (aes67_stream)"))
+    return out
+
+
 def _merge_states(findings: list[dict]) -> list[dict]:
     """The same finding in several states, once, with the states it shows in."""
     out, seen = [], {}
@@ -290,6 +318,8 @@ def audit(design: dict, roles: dict | None = None, snapshot_values: dict | None 
 
     # static hygiene, once
     wired = {p for w in design["wires"] for p in w}
+    for f in network_audio(design, wired):
+        add("warning", *f)
     for c in design["components"]:
         sig = [p for p in c["pins"] if not p.get("control")]
         if sig and not any(f"{c['name']}.{p['dir']}.{p['index']}" in wired for p in sig):
