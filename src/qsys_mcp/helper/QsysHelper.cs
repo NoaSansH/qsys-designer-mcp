@@ -207,7 +207,9 @@ static partial class QsysHelper
             foreach (var p in Q.Pins(comp, dir))
             {
                 var o = new JObject { { "dir", dir == "Input" ? "in" : "out" }, { "index", ++i }, { "name", Q.PinName(p) } };
-                if (Convert.ToString(Q.TryF(p, "Domain")) == "Control")
+                var domain = Convert.ToString(Q.TryF(p, "Domain"));
+                if (domain != "Control" && domain != "Audio" && !string.IsNullOrEmpty(domain)) o["domain"] = domain;   // video, serial...
+                if (domain == "Control")
                 {
                     o["control"] = true;
                     var code = Convert.ToString(Q.TryF(p, "CodeName"));

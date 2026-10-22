@@ -193,9 +193,12 @@ def audit_design(path: str, roles: dict | None = None, with_snapshots: bool = Tr
     (feedback), a PC getting its own audio back (echo, loop), an AEC reference not taken after the room
     volume, blocks with no connection, limiter thresholds above 0 dBFS, high stored gains, blocks open to
     QRC. Paths follow the wiring through each block in its state: muted or -100 dB crosspoints and muted
-    gains stop them. with_snapshots also checks every saved snapshot (read from the file). roles, when
-    the inferred ones aren't right: {"mics": [...], "speakers": [...], "pc_links": [[in, out]],
-    "aec_reference": "BLOCK.in.N", "volume": "BLOCK"} (blocks or pins)."""
+    gains stop them. Gain structure: a nominal level (-20 dBFS) leaves every source and follows the gains,
+    mixer gains and limiters; clipping, little headroom (above -6 dBFS) or a level lost in the noise (below
+    -45 dBFS) at an output are reported, and output_levels gives each output's level in each state.
+    with_snapshots also checks every saved snapshot (read from the file). roles, when the inferred ones
+    aren't right: {"mics": [...], "speakers": [...], "pc_links": [[in, out]], "aec_reference": "BLOCK.in.N",
+    "volume": "BLOCK", "levels": {"BLOCK" or "BLOCK.out.N": dBFS}} (blocks or pins)."""
     from qsys_mcp import audit, snapshotdata
     design = designs.read(path)
     values = snapshotdata.contents(path, design) if with_snapshots else None
