@@ -120,6 +120,32 @@ static partial class QsysHelper
         return new JObject { { "element", e.GetType().Name }, { "was", new JObject { { "x", pos.X }, { "y", pos.Y }, { "w", size.Width }, { "h", size.Height } } } };
     }
 
+    // {"op": "add_text_controls", "component", "controls": [as in text_controller.controls]}
+    // Controls added after the Text Controller's own: its other controls, their pins, wires and values stay.
+    static JObject AddTextControls(Ctx ctx, object c, JArray controls)
+    {
+        if ((string)Q.Get(c, "ClassName") != "device_controller_script") throw new Exception(NameOf(c) + " is not a Text Controller");
+        if (controls == null || controls.Count == 0) throw new Exception("add_text_controls needs controls");
+        var raw = Convert.ToString(Q.GetProp(c, "config"));
+        var config = JObject.Parse(string.IsNullOrEmpty(raw) ? "{}" : raw);
+        var specs = config["ControlSpecs"] as JArray ?? new JArray();
+        var names = new HashSet<string>(specs.Select(x => (string)x["Name"]));
+        var added = (JArray)JObject.Parse(TextControllerConfig(controls))["ControlSpecs"];
+        foreach (JObject a in added)
+        {
+            if (!names.Add((string)a["Name"])) throw new Exception(NameOf(c) + " already has a control named " + a["Name"]);
+            specs.Add(a);
+        }
+        config["ControlSpecs"] = specs;
+        var before = PinWires(ctx, c);
+        Q.SetProp(c, "config", config.ToString(Newtonsoft.Json.Formatting.None));
+        Q.Refresh(c);
+        var pins = Q.L(Q.Get(c, "Pins"));
+        var lost = before.Where(w => !pins.Contains(Q.Get(w, "PinA")) && !pins.Contains(Q.Get(w, "PinB"))).ToList();
+        if (lost.Count > 0) throw new Exception("adding controls to " + NameOf(c) + " would drop " + lost.Count + " wires");
+        return new JObject { { "controls", new JArray(specs.Select(x => (string)x["Name"])) }, { "pins", PinInfo(c) } };
+    }
+
     static object EnsureManager()
     {
         var mgrField = Q.T("QSC.QSys.App").GetField("Manager", Q.All);
@@ -214,6 +240,8 @@ static partial class QsysHelper
             case "add_control_pins":
                 AddControlPins(Comp(ctx, op), op["controls"] as JArray);
                 return PinInfo(Comp(ctx, op));
+            case "add_text_controls":
+                return AddTextControls(ctx, Comp(ctx, op), op["controls"] as JArray);
             case "rename_inventory":
             {
                 // {"op": "rename_inventory", "item": "old name" (the Core's too), "name": "new name"}
@@ -358,7 +386,7 @@ static partial class QsysHelper
                 return SetUciElement(ctx, op);
             default:
                 throw new Exception("unknown op; ops are set_value, set_values, set_property, move, set_label, set_access, rename, set_lua, " +
-                    "add_control_pins, add_inventory, set_usb_bridge, set_design_properties, add_component, remove_component, add_wire, " +
+                    "add_control_pins, add_text_controls, add_inventory, set_usb_bridge, set_design_properties, add_component, remove_component, add_wire, " +
                     "remove_wire, add_signal, rename_signal, remove_signal, add_graphic, set_graphic, remove_graphic, add_snapshot_bank, " +
                     "add_uci, remove_uci, set_uci_element, add_named_control, remove_named_control, set_global_snapshot_count, " +
                     "rename_inventory");

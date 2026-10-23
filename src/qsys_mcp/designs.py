@@ -288,7 +288,7 @@ def build(spec: dict, path: str, overwrite: bool = False, designer_version: str 
 
 
 EDIT_OPS = {"set_value", "set_values", "set_property", "move", "set_label", "set_access", "rename", "set_lua", "add_control_pins",
-            "add_inventory", "set_usb_bridge", "set_design_properties", "add_component", "remove_component", "add_wire",
+            "add_text_controls", "add_inventory", "set_usb_bridge", "set_design_properties", "add_component", "remove_component", "add_wire",
             "remove_wire", "add_signal", "rename_signal", "remove_signal", "add_graphic", "set_graphic", "remove_graphic",
             "add_snapshot_bank", "add_uci", "remove_uci", "set_uci_element", "rename_inventory", "add_named_control", "remove_named_control",
             "set_global_snapshot_count"}
@@ -313,6 +313,10 @@ def edit(path: str, ops: list[dict], out_path: str | None = None, base_dir: str 
             name = (op.get("component") or {}).get("name")
             if not name or not NAME_RE.match(name):
                 problems.append(f"ops[{i}]: the new component needs a valid name, not {name!r}")
+        elif kind == "add_text_controls":
+            ctl = op.get("controls")
+            if not isinstance(ctl, list) or not ctl or not all(isinstance(c, dict) and c.get("name") for c in ctl):
+                problems.append(f"ops[{i}]: add_text_controls needs controls, each with a name")
         elif kind == "add_uci" and isinstance(op.get("uci"), dict):
             problems += _uci_media(op["uci"], base_dir)
         elif kind == "set_lua" and "lua" in op:
