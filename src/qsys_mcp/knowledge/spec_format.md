@@ -229,6 +229,7 @@ Blocks can be placed for you, along the signal flow:
 | `set_label`, `set_access`, `rename` | `component` and `label` / `script_access` / `name` |
 | `set_lua` | `component`, `lua` |
 | `add_control_pins` | `component`, `controls` |
+| `add_text_controls` | `component` (a Text Controller), `controls` (as in `text_controller.controls`); its other controls, pins, wires and values stay |
 | `add_inventory`, `set_usb_bridge`, `set_design_properties` | `item` (an inventory spec) / `item` + `settings` / `settings` |
 | `add_component`, `remove_component` | `component` (a component spec / a name); removing also drops its wires and snapshot entries |
 | `add_wire`, `remove_wire` | `from`, `to` (and `signal` to name it) |

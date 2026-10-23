@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- `edit_design` op `add_text_controls`: controls added to a saved Text Controller (as in `text_controller.controls`); its other controls, pins, wires, Lua and Script Access stay. A name already used is refused.
+
 ## 0.7.1 (2026-10-22)
 
 - CI can be started by hand from the Actions tab (Run workflow). First release published by the CI with its package.
